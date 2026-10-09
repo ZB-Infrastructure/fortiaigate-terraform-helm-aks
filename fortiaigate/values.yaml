@@ -359,6 +359,15 @@ tls:
   existingSecret: ""
   existingSecretChecksum: ""
 
+  # Optional separate secret for scanners, logd, license-manager, and databases.
+  # Empty preserves the shared-secret behavior for standalone Helm installs.
+  # Both secrets need tls.crt/tls.key; the separate internal secret needs ca.crt.
+  # Also set postgresql.tls.certificatesSecret and redis.tls.existingSecret to
+  # this name, and redis.tls.certCAFilename to ca.crt (Terraform does this).
+  internalExistingSecret: ""
+  internalExistingSecretChecksum: ""
+  internalMountPath: "/etc/internal-tls"
+
 # PostgreSQL Configuration
 # For advanced configuration options, refer to:
 # https://github.com/bitnami/charts/tree/main/bitnami/postgresql#parameters

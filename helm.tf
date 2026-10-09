@@ -110,6 +110,10 @@ locals {
           "appgw.ingress.kubernetes.io/backend-protocol" = "https"
           "appgw.ingress.kubernetes.io/ssl-redirect"     = "true"
         } : {},
+        var.ingress_class == "azure-application-gateway" && !local.generated_web_tls ? {
+          "appgw.ingress.kubernetes.io/backend-hostname"      = var.ingress_host
+          "appgw.ingress.kubernetes.io/health-probe-hostname" = var.ingress_host
+        } : {},
         var.ingress_annotations,
       )
     }
@@ -126,12 +130,10 @@ locals {
     }
   })] : []
 
-  # Internal mode + self-signed TLS: tell AGIC to validate the HTTPS backends
-  # against the per-deployment CA that appgw.tf uploads as a trusted root.
-  # Without it the gateway can't trust the backend cert and returns 502. Public
-  # mode's add-on gateway isn't Terraform-managed, so the CA isn't uploaded there;
-  # Let's Encrypt chains to a well-known CA and needs nothing.
-  appgw_trusted_root_values = (local.appgw_byo && !var.letsencrypt_enabled) ? [yamlencode({
+  # Private gateways trust the generated or supplied web CA uploaded in appgw.tf.
+  # Public add-on gateways require manual private-root installation; publicly
+  # trusted web certificates need no custom root upload.
+  appgw_trusted_root_values = (local.appgw_byo && local.web_has_private_ca) ? [yamlencode({
     ingress = {
       annotations = {
         "appgw.ingress.kubernetes.io/appgw-trusted-root-certificate" = local.appgw_trusted_root_name
@@ -139,70 +141,40 @@ locals {
     }
   })] : []
 
-  # The chart mounts fortiaigate-tls-secret by name (tls.existingSecret). Who
-  # owns it depends on the mode:
-  #   - self-signed (default): Terraform's kubernetes_secret.tls owns it, and the
-  #     checksum is the cert content so regenerating it triggers a pod rollout.
-  #   - Let's Encrypt: cert-manager owns it (certmanager.tf). Terraform doesn't
-  #     know the cert content, so the checksum keys off the ACME environment
-  #     instead -- flipping staging->production rolls the pods to pick up the new
-  #     cert. The name is the well-known secret cert-manager writes to.
-  tls_secret_name     = var.letsencrypt_enabled ? "fortiaigate-tls-secret" : kubernetes_secret.tls[0].metadata[0].name
-  tls_secret_checksum = var.letsencrypt_enabled ? "letsencrypt-${var.letsencrypt_environment}" : sha256(tls_locally_signed_cert.fortiaigate[0].cert_pem)
+  # Web/API and internal services have independent secrets and rollout checksums.
+  tls_secret_name       = var.letsencrypt_enabled ? "fortiaigate-tls-secret" : kubernetes_secret.tls[0].metadata[0].name
+  tls_secret_checksum   = var.letsencrypt_enabled ? "letsencrypt-${var.letsencrypt_environment}" : sha256(local.supplied_tls ? local.supplied_certificate : tls_locally_signed_cert.fortiaigate[0].cert_pem)
+  internal_tls_checksum = sha256(tls_locally_signed_cert.fortiaigate[0].cert_pem)
   tls_values = [yamlencode({
     tls = {
-      enabled                = true
-      existingSecret         = local.tls_secret_name
-      existingSecretChecksum = local.tls_secret_checksum
-      # In Let's Encrypt mode cert-manager rewrites the secret out-of-band from
-      # any terraform apply (90-day renewals) and finishes the staging->prod
-      # issuance minutes AFTER the checksum-triggered roll fires, so the pods can
-      # come up on the old/staging cert. The Reloader controller (installed below,
-      # also LE-only) watches the secret and rolls core/api/webui when it actually
-      # changes, which closes that race and handles silent renewals. Off for
-      # self-signed mode, where the cert exists at apply time and the checksum roll
-      # is sufficient.
-      reloaderEnabled = var.letsencrypt_enabled
+      enabled                        = true
+      existingSecret                 = local.tls_secret_name
+      existingSecretChecksum         = local.tls_secret_checksum
+      internalExistingSecret         = kubernetes_secret.internal_tls.metadata[0].name
+      internalExistingSecretChecksum = local.internal_tls_checksum
+      internalMountPath              = "/etc/internal-tls"
+      reloaderEnabled                = var.letsencrypt_enabled
     }
     postgresql = {
       tls = {
-        certificatesSecret = local.tls_secret_name
+        enabled            = true
+        certificatesSecret = kubernetes_secret.internal_tls.metadata[0].name
       }
       primary = {
-        podAnnotations = {
-          "checksum/tls" = local.tls_secret_checksum
-        }
+        podAnnotations = { "checksum/tls" = local.internal_tls_checksum }
       }
     }
     redis = {
       tls = {
-        existingSecret = local.tls_secret_name
+        enabled        = true
+        existingSecret = kubernetes_secret.internal_tls.metadata[0].name
+        certCAFilename = "ca.crt"
       }
       master = {
-        podAnnotations = {
-          "checksum/tls" = local.tls_secret_checksum
-        }
+        podAnnotations = { "checksum/tls" = local.internal_tls_checksum }
       }
     }
   })]
-
-  # In Let's Encrypt mode the bundled PostgreSQL and Redis CANNOT use the shared
-  # secret. The chart points every app pod's REDIS_SSL_CA_CERTS /
-  # POSTGRES_SSL_CA_CERTS -- and redis's own probe (certCAFilename: tls.crt) --
-  # at the serving cert AS its own CA, which is only valid for a self-signed
-  # cert. An ACME leaf can't validate itself, so redis crashloops on
-  # "tlsv1 alert unknown ca" and app->DB TLS breaks. Disable DB TLS in LE mode
-  # so the LE cert is used only for the app serving cert + ingress listener
-  # (which is what fixes the backend 502 and the browser warning). Self-signed
-  # mode keeps DB TLS on, unchanged. The proper alternative -- keep DB TLS via a
-  # separate self-signed secret -- needs a chart change mirrored to the EKS repo
-  # (see docs/tls-letsencrypt.md). This leaves database traffic unencrypted,
-  # potentially across nodes when multiple app nodes are licensed; see ROADMAP.md.
-  # Appended AFTER tls_values so enabled=false wins.
-  db_tls_values = var.letsencrypt_enabled ? [yamlencode({
-    postgresql = { tls = { enabled = false } }
-    redis      = { tls = { enabled = false } }
-  })] : []
 }
 
 # PostgreSQL credentials, owned by Terraform rather than the Helm release.
@@ -350,6 +322,8 @@ resource "helm_release" "fortiaigate" {
     kubernetes_storage_class.azurefile,
     kubernetes_config_map.licenses,
     kubernetes_secret.tls,
+    kubernetes_secret.internal_tls,
+    terraform_data.tls_configuration,
     # The trusted root must exist on the gateway before AGIC reads the annotation.
     azurerm_application_gateway.this,
     # In Let's Encrypt mode this owns fortiaigate-tls-secret instead; both are
@@ -380,7 +354,6 @@ resource "helm_release" "fortiaigate" {
     local.appgw_trusted_root_values,
     local.ingress_annotation_values,
     local.tls_values,
-    local.db_tls_values,
     local.license_node_values,
   )
 

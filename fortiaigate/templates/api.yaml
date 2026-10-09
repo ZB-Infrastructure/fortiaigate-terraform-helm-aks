@@ -29,6 +29,7 @@ spec:
     metadata:
       annotations:
         # This is the key that triggers a restart when TLS certificates change
+        checksum/internal-tls: {{ include "fortiaigate.internalTlsChecksum" . | quote }}
         checksum/tls: {{ include "fortiaigate.tlsChecksum" . | quote }}
       labels:
         app: api
@@ -107,21 +108,21 @@ spec:
           value: {{ .Values.redis.tls.enabled | quote }}
         {{- if .Values.redis.tls.enabled }}
         - name: REDIS_SSL_CERTFILE
-          value: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/tls.crt" (include "fortiaigate.dbTlsMountPath" .) | quote }}
         - name: REDIS_SSL_KEYFILE
-          value: {{ printf "%s/tls.key" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/tls.key" (include "fortiaigate.dbTlsMountPath" .) | quote }}
         - name: REDIS_SSL_CA_CERTS
-          value: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/%s" (include "fortiaigate.dbTlsMountPath" .) (include "fortiaigate.dbTlsCAFile" .) | quote }}
         {{- end }}
         - name: POSTGRES_SSL_ENABLED
           value: {{ .Values.postgresql.tls.enabled | quote }}
         {{- if .Values.postgresql.tls.enabled }}
         - name: POSTGRES_SSL_CERTFILE
-          value: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/tls.crt" (include "fortiaigate.dbTlsMountPath" .) | quote }}
         - name: POSTGRES_SSL_KEYFILE
-          value: {{ printf "%s/tls.key" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/tls.key" (include "fortiaigate.dbTlsMountPath" .) | quote }}
         - name: POSTGRES_SSL_CA_CERTS
-          value: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+          value: {{ printf "%s/%s" (include "fortiaigate.dbTlsMountPath" .) (include "fortiaigate.dbTlsCAFile" .) | quote }}
         {{- end }}
         # Database configuration (only what's actually used by the application)
         - name: REDIS_HOST
@@ -160,6 +161,7 @@ spec:
             drop:
               - ALL
         volumeMounts:
+        {{- include "fortiaigate.dbTlsVolumeMount" . | nindent 8 }}
         - name: shared-data
           mountPath: /etc/fortiaigate/
           readOnly: false
@@ -171,6 +173,7 @@ spec:
           readOnly: true
         {{- end }}
       volumes:
+      {{- include "fortiaigate.dbTlsVolume" . | nindent 6 }}
       - name: shared-data
         persistentVolumeClaim:
           claimName: {{ include "fortiaigate.fullname" . }}-storage

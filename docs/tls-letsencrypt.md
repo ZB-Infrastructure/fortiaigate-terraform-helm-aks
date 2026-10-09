@@ -12,13 +12,13 @@ at once:
 - **Frontend (browser) trust.** The chart's ingress emits `spec.tls` referencing
   that secret, which AGIC reads to set the Application Gateway listener
   certificate. A real cert means no browser warning.
-- **Backend trust / the 502.** The FortiAIGate pods serve HTTPS natively using
+- **Backend trust / the 502.** Core, API, and webui serve HTTPS natively using
   the same secret. Application Gateway validates the backend certificate chain;
   a self-signed cert has no trusted chain, so every backend is marked unhealthy
   and the gateway returns **502 Bad Gateway**. A Let's Encrypt cert is signed by
   a well-known CA and cert-manager writes the **full chain** into `tls.crt`, so
   Application Gateway trusts the backend with **no trusted-root upload and no
-  extra annotation**.
+  private-root annotation**. Backend/probe hostnames are set to `ingress_host`.
 
 ## How it authenticates (no secrets)
 
@@ -126,26 +126,16 @@ cert-manager swaps in the real cert when issuance completes.
 
 ## Notes and caveats
 
-- **PostgreSQL/Redis CANNOT use the LE secret — `helm.tf` disables their TLS in
-  LE mode.** The chart points every app pod's `REDIS_SSL_CA_CERTS` /
-  `POSTGRES_SSL_CA_CERTS`, and redis's own probe (`certCAFilename: tls.crt`), at
-  the serving cert *as its own CA* — valid only for a self-signed cert. An ACME
-  leaf can't validate itself, so redis crashloops on `tlsv1 alert unknown ca` and
-  app→DB TLS breaks. `local.db_tls_values` therefore sets
-  `postgresql.tls.enabled=false` / `redis.tls.enabled=false` when
-  `letsencrypt_enabled = true`. This is safe: node-keyed licensing pins postgres,
-  redis, and all app pods onto the single licensed app node, so DB traffic never
-  leaves it. The earlier "DBs share the secret, harmless" claim was **wrong** —
-  redis's probe *does* verify the CA. (Keeping DB TLS *and* a public ingress cert
-  is the "Option B" follow-up: give the DBs a separate self-signed secret — a
-  chart change mirrored to EKS, not yet done.)
-- **Flipping an already-running deploy from DB-TLS-on to off deadlocks the redis
-  StatefulSet.** The old crashlooping redis pod never goes Ready, so the rolling
-  update won't recreate it on the new (TLS-off) spec — `updateRevision` !=
-  `currentRevision` and the apply hangs. One-time fix:
-  `kubectl delete pod fortiaigate-redis-master-0 -n fortiaigate` forces
-  recreation on the new revision. A **fresh** deploy (no pre-existing TLS redis
-  pod) doesn't hit this.
+- **Internal services and databases retain TLS.** Terraform creates
+  `fortiaigate-internal-tls-secret` from a generated CA and serving certificate.
+  PostgreSQL, Redis, scanners, logd, and license-manager use it. Database clients
+  mount it separately and verify against `ca.crt`; the ACME certificate is used
+  only by core/API/webui and the ingress listener.
+- **Upgrading an existing LE deployment re-enables database TLS.** App and database
+  updates are not atomic; schedule an upgrade window and check connectivity after
+  all pods roll. If an already-unhealthy Redis pod stalls the StatefulSet rollout,
+  inspect logs/revisions and recreate the pod after the updated spec is applied.
+  See [supplied certificates and upgrade notes](tls-supplied.md#renewal-and-upgrades).
 - **Staging → production is a real two-apply step, and production can be flaky.**
   The staging root is untrusted by both browsers and Application Gateway, so the
   502 only clears on production. When you flip, watch for two production-side
@@ -204,52 +194,14 @@ cert-manager swaps in the real cert when issuance completes.
   the EKS repo at the time. Browser entry point is **`/ui`**, not
   `/`.
 
-## Planned follow-up: Option B — keep DB TLS via a separate self-signed secret (AKS-only)
+## Internal TLS
 
-Status: **not implemented** (current behavior is DB-TLS-off in LE mode, above).
-Decision: implement this **AKS-only**. The AKS `fortiaigate/` chart already
-differs from the EKS copy through platform-specific patches; this follow-up
-would add an internal database certificate without changing the EKS chart.
+The separate internal-secret implementation is included in this AKS repository.
+It keeps database TLS enabled independently of Let's Encrypt issuance/renewal
+and does not change the EKS repository. The chart's optional
+`tls.internalExistingSecret`, `tls.internalExistingSecretChecksum`, and
+`tls.internalMountPath` settings preserve the old shared-secret behavior when
+no internal secret is specified. Terraform explicitly configures the separate
+secret and database CA filename.
 
-**Goal:** restore in-cluster TLS for postgres/redis while the public ingress/app
-serving cert stays Let's Encrypt — by splitting the DB role onto its own
-self-signed secret (`fortiaigate-db-tls-secret`). A self-signed cert is its own
-CA, so the chart's `certCAFilename: tls.crt` / `REDIS_SSL_CA_CERTS=.../tls.crt`
-self-reference works again.
-
-**Chart changes (`fortiaigate/`, backward-compatible):**
-1. `values.yaml`: add `tls.dbExistingSecret` and `tls.dbMountPath`, **defaulting
-   to** `tls.existingSecret` / `tls.mountPath`. With the defaults, self-signed
-   mode is unchanged (one secret) — only LE mode overrides them.
-2. The four DB-talking templates — `core.yaml`, `api.yaml`, `logd.yaml`,
-   `license-manager.yaml` — repoint `REDIS_SSL_CERTFILE/KEYFILE/CA_CERTS` and
-   `POSTGRES_SSL_*` from `{{ .Values.tls.mountPath }}` to
-   `{{ .Values.tls.dbMountPath }}`, and add a second volume/volumeMount for the
-   DB secret. (`webui.yaml` doesn't touch the DBs — leave it.)
-3. Point the subcharts at the DB secret: `postgresql.tls.certificatesSecret` and
-   `redis.tls.existingSecret` → `tls.dbExistingSecret`.
-
-**Terraform changes (AKS root):**
-4. `tls.tf`: make the self-signed cert + `kubernetes_secret` **always** created
-   (today they're `count = 0` in LE mode) under the name `fortiaigate-db-tls-secret`.
-   Give it SANs for the DB service names (`fortiaigate-postgresql`,
-   `fortiaigate-redis-master`) as hygiene.
-5. `helm.tf`: change `local.db_tls_values` — instead of disabling DB TLS in LE
-   mode, **re-enable** `postgresql.tls`/`redis.tls`, set
-   `tls.dbExistingSecret = "fortiaigate-db-tls-secret"` + `tls.dbMountPath`, and
-   give the DB pods their own checksum (off the self-signed DB cert) so they roll
-   when it regenerates, independent of the LE checksum.
-
-**Verify first:** confirm the app verifies the DB **CA but not hostname** (the
-pre-LE single-self-signed-cert state worked even though `CN=ingress_host` ≠ the DB
-service names, which implies hostname verify is off). If strict hostname verify
-turns out to be on, the DB cert needs the DB service-name SANs (step 4 covers it).
-
-**Switch-over gotcha:** flipping a *running* cluster from DB-TLS-off back to on
-re-triggers the redis StatefulSet rolling-update deadlock — plan a one-time
-`kubectl delete pod fortiaigate-redis-master-0 -n fortiaigate` during the apply.
-
-**Validate on staging** (`letsencrypt_environment = "staging"`) before production,
-same as the main flow. Risk is low: the backward-compatible defaults mean a
-mistake can't affect the self-signed path, and a DB-trust regression fails loudly
-(redis crashloops on `tlsv1 alert unknown ca`).
+For supplied PEM web/API certificates, see [the supplied certificate guide](tls-supplied.md).

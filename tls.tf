@@ -1,37 +1,26 @@
-# Generate the TLS material at apply time so no private key material needs to
-# live in the repository.
-#
-# This is the default (var.letsencrypt_enabled = false). When Let's Encrypt is
-# enabled, cert-manager owns fortiaigate-tls-secret instead (see certmanager.tf),
-# so every resource here resolves to zero and Terraform stops managing the
-# secret -- letting cert-manager's Certificate create and rotate it.
-#
-# Why a private CA rather than a bare self-signed cert: Application Gateway v2
-# only trusts an HTTPS backend whose chain ends in a well-known CA or in a
-# ROOT certificate uploaded to the gateway (a CA cert, not a self-signed leaf).
-# A bare self-signed serving cert therefore made every AGIC backend unhealthy
-# (the 502). The serving cert is now signed by a per-deployment CA; in internal
-# mode appgw.tf uploads that CA as the gateway's trusted root and helm.tf points
-# the Ingress at it. In public mode the add-on owns the gateway, so the CA is
-# not uploaded automatically (see docs/application-gateway-dns-tls.md).
-#
-# The chart uses tls.crt as the CA bundle for Redis/PostgreSQL client
-# verification (REDIS_SSL_CA_CERTS / POSTGRES_SSL_CA_CERTS / certCAFilename),
-# so tls.crt carries the full chain (leaf + CA): servers present the chain and
-# clients find the CA in the same file.
+# Keep generated TLS material for internal services and databases in every mode.
+# Existing generated resource addresses are retained for upgrade compatibility.
+# Web/API HTTPS uses generated material, supplied PEM files, or cert-manager.
+# No CA private key is needed when supplying a serving certificate.
 
 locals {
-  tls_common_name = var.ingress_host != "" ? var.ingress_host : "fortiaigate.local"
+  supplied_tls         = var.tls_certificate_path != ""
+  generated_web_tls    = !var.letsencrypt_enabled && !local.supplied_tls
+  supplied_certificate = local.supplied_tls ? try(file(var.tls_certificate_path), "") : ""
+  supplied_private_key = var.tls_private_key_path != "" ? sensitive(try(file(var.tls_private_key_path), "")) : ""
+  web_trusted_root     = local.generated_web_tls ? tls_self_signed_cert.ca[0].cert_pem : (var.tls_ca_certificate_path != "" ? try(file(var.tls_ca_certificate_path), "") : "")
+  web_has_private_ca   = local.generated_web_tls || var.tls_ca_certificate_path != ""
+  tls_common_name      = var.ingress_host != "" ? var.ingress_host : "fortiaigate.local"
 }
 
 resource "tls_private_key" "ca" {
-  count     = var.letsencrypt_enabled ? 0 : 1
+  count     = 1
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
 resource "tls_self_signed_cert" "ca" {
-  count           = var.letsencrypt_enabled ? 0 : 1
+  count           = 1
   private_key_pem = tls_private_key.ca[0].private_key_pem
 
   is_ca_certificate = true
@@ -51,13 +40,13 @@ resource "tls_self_signed_cert" "ca" {
 }
 
 resource "tls_private_key" "fortiaigate" {
-  count     = var.letsencrypt_enabled ? 0 : 1
+  count     = 1
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
 resource "tls_cert_request" "fortiaigate" {
-  count           = var.letsencrypt_enabled ? 0 : 1
+  count           = 1
   private_key_pem = tls_private_key.fortiaigate[0].private_key_pem
 
   subject {
@@ -71,7 +60,7 @@ resource "tls_cert_request" "fortiaigate" {
   dns_names = distinct(compact(concat(
     [var.ingress_host, "localhost"],
     flatten([
-      for svc in ["core", "api", "webui", "license-manager", "fortiaigate-postgresql", "fortiaigate-redis-master"] : [
+      for svc in ["core", "api", "webui", "license-manager", "fortiaigate-postgresql", "fortiaigate-redis-master", "language", "code", "promptinjection", "sensitive", "toxicity", "anonymize", "deanonymize", "customrule", "logd"] : [
         svc,
         "${svc}.${var.namespace}",
         "${svc}.${var.namespace}.svc",
@@ -82,7 +71,7 @@ resource "tls_cert_request" "fortiaigate" {
 }
 
 resource "tls_locally_signed_cert" "fortiaigate" {
-  count              = var.letsencrypt_enabled ? 0 : 1
+  count              = 1
   cert_request_pem   = tls_cert_request.fortiaigate[0].cert_request_pem
   ca_private_key_pem = tls_private_key.ca[0].private_key_pem
   ca_cert_pem        = tls_self_signed_cert.ca[0].cert_pem
@@ -98,7 +87,8 @@ resource "tls_locally_signed_cert" "fortiaigate" {
 }
 
 resource "kubernetes_secret" "tls" {
-  count = var.letsencrypt_enabled ? 0 : 1
+  depends_on = [terraform_data.tls_configuration]
+  count      = var.letsencrypt_enabled ? 0 : 1
 
   metadata {
     name      = "fortiaigate-tls-secret"
@@ -118,6 +108,39 @@ resource "kubernetes_secret" "tls" {
 
   data = {
     # Full chain: leaf first, then the CA (see the header comment).
+    "tls.crt" = local.supplied_tls ? local.supplied_certificate : "${tls_locally_signed_cert.fortiaigate[0].cert_pem}${tls_self_signed_cert.ca[0].cert_pem}"
+    "tls.key" = local.supplied_tls ? local.supplied_private_key : tls_private_key.fortiaigate[0].private_key_pem
+    "ca.crt"  = local.web_trusted_root
+  }
+}
+
+# Configuration checks also run when cert-manager owns the web secret.
+resource "terraform_data" "tls_configuration" {
+  input = local.supplied_tls ? "supplied" : (var.letsencrypt_enabled ? "letsencrypt" : "generated")
+
+  lifecycle {
+    precondition {
+      condition     = (var.tls_certificate_path != "") == (var.tls_private_key_path != "")
+      error_message = "Set both tls_certificate_path and tls_private_key_path, or leave both empty."
+    }
+    precondition {
+      condition     = !local.supplied_tls || (!var.letsencrypt_enabled && trimspace(var.ingress_host) != "")
+      error_message = "Supplied TLS requires ingress_host and letsencrypt_enabled=false."
+    }
+    precondition {
+      condition     = var.tls_ca_certificate_path == "" || local.supplied_tls
+      error_message = "tls_ca_certificate_path is only valid with a supplied serving certificate."
+    }
+  }
+}
+
+resource "kubernetes_secret" "internal_tls" {
+  metadata {
+    name      = "fortiaigate-internal-tls-secret"
+    namespace = kubernetes_namespace.fortiaigate.metadata[0].name
+  }
+  type = "kubernetes.io/tls"
+  data = {
     "tls.crt" = "${tls_locally_signed_cert.fortiaigate[0].cert_pem}${tls_self_signed_cert.ca[0].cert_pem}"
     "tls.key" = tls_private_key.fortiaigate[0].private_key_pem
     "ca.crt"  = tls_self_signed_cert.ca[0].cert_pem

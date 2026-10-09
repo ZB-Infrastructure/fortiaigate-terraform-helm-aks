@@ -3,10 +3,10 @@
 This repository is a deployment starting point. The production example does not
 establish application HA, disaster recovery, or a security baseline by itself.
 
-- **Database TLS:** Let's Encrypt mode currently disables PostgreSQL and Redis
-  TLS. Use a separate internal CA and certificates for database traffic, with
-  matching client trust and renewal handling. Multiple licensed app nodes mean
-  traffic can cross nodes; colocation must not be assumed.
+- **Certificate lifecycle:** internal TLS now uses a separate generated CA and
+  serving certificate in every web TLS mode. Qualify renewal/rotation and
+  upgrades from existing Let's Encrypt deployments in live integration tests;
+  supplied PEM web certificates require replacement and Terraform apply.
 - **Stable secrets:** the shared chart generates a new CSRF key on each render
   unless `fortiaigate.env.csrfSecretKey` is supplied. Preserve the existing secret
   on upgrade or support an externally managed secret. Coordinate shared chart

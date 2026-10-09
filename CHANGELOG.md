@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Support supplied PEM web/API certificates and optional private root CA trust for Application Gateway.
+- Separate internal service/database TLS from web certificates and retain database TLS in Let's Encrypt mode.
+- Add certificate preflight validation, mocked Terraform TLS tests, and Helm checks for independent secrets and rollouts.
+
 - Replace the bare self-signed serving cert with one signed by a per-deployment CA (`tls.crt` carries the chain); in internal mode upload the CA to the gateway as a trusted root and annotate the Ingress, removing the self-signed 502. New `tls_ca_certificate` output for client trust stores.
 - Roll license-manager when license file contents change (`license.checksum`), mount the ConfigMap named by `license.existingConfigMap`, and list `app_node_vm_size` in the tfvars examples.
 - Make `internal = true` a complete private-ingress deployment: Terraform creates the Application Gateway with a static private frontend (`appgw_private_ip`), points the AGIC add-on at it, grants the add-on identity access, and exposes `appgw_private_ip` as an output. Public mode is unchanged.

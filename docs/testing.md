@@ -14,12 +14,16 @@ tflint --init
 tflint --recursive --format compact
 python3 -m pip install -r tests/requirements.txt
 python3 -m unittest discover -s tests -v
+python3 scripts/test_tls.py # Terraform 1.7+; mocked tests in an isolated checkout
 ```
 
 The Helm suite renders representative AKS values and checks CPU/GPU behavior,
 licensed hostname affinity, independent app/Triton image tags, backend readiness
 paths, separate database disks,
-external TLS secret references, and staging/production Certificate resources.
+separate web/internal TLS secrets and rollout checksums, and staging/production Certificate resources.
+The certificate preflight tests use real temporary keys/certificates. The mocked
+Terraform suite covers generated, supplied public/private, and Let's Encrypt
+modes, as well as invalid input combinations.
 It also verifies missing issuer inputs fail rendering. It uses the committed
 subcharts without refreshing dependencies. It does not exercise Terraform value
 merging, Azure permissions, image availability, admission controllers, or actual
@@ -45,7 +49,8 @@ two-step bootstrap. These operations create billable Azure resources.
    continuing to incur its VM cost. Node repair/upgrade can still replace it.
 5. Exercise Let's Encrypt staging then production in a disposable DNS name.
    Confirm Certificate readiness, gateway health, and pod reload after secret
-   changes. Review the database TLS limitation in [ROADMAP.md](../ROADMAP.md).
+   changes. Verify PostgreSQL/Redis TLS against the separate internal CA. Test supplied
+   public/private certificates and replacement using [the supplied TLS guide](tls-supplied.md).
 6. Back up and restore database data and the shared file data. Test a node
    replacement and license reassignment before planning a production upgrade.
 7. Follow the README teardown sequence; check for remaining disks/shares and

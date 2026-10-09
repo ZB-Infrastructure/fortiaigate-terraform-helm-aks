@@ -34,7 +34,7 @@ spec:
     metadata:
       annotations:
         # This is the key that triggers a restart when TLS certificates change
-        checksum/tls: {{ include "fortiaigate.tlsChecksum" $ | quote }}
+        checksum/tls: {{ include "fortiaigate.internalTlsChecksum" $ | quote }}
       labels:
         app: scanner
         scanner-type: {{ $scanner }}
@@ -154,7 +154,7 @@ spec:
       volumes:
       - name: tls-certs
         secret:
-          secretName: {{ include "fortiaigate.tlsSecretName" $ }}
+          secretName: {{ include "fortiaigate.internalTlsSecretName" $ }}
       {{- end }}
       {{- with $.Values.fortiaigate.image.pullSecrets }}
       imagePullSecrets:

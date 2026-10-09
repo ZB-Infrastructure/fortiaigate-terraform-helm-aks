@@ -235,10 +235,13 @@ the gateway trusts the HTTPS backends. This removes the self-signed **502**.
   every rebuild, so re-distribute after a teardown.
 - **Certificate names.** The serving cert covers `ingress_host`, `localhost`
   (AGIC's default probe host) and the in-cluster Service names.
-- **Database TLS is unchanged.** `tls.crt` carries the full chain (leaf + CA),
-  and the chart uses that file as the CA bundle for PostgreSQL/Redis clients.
-  Verified with psql `verify-full`, `redis-cli --tls`, and Python `ssl` with
-  hostname checking.
+- **Internal/database TLS stays enabled in every mode.** Internal services and
+  databases use `fortiaigate-internal-tls-secret`. Database clients mount that
+  secret separately and use `ca.crt` as their trust bundle. The generated
+  certificate covers the internal service names.
+- **Supplied certificates** are supported for web/API HTTPS, including corporate
+  certificates. See [the supplied certificate guide](tls-supplied.md) for PEM
+  inputs, gateway trust, preflight checks, renewal, and upgrade behavior.
 - **Let's Encrypt** (`letsencrypt_enabled = true`) remains the option for a
   browser-trusted cert without distributing a CA. It needs the domain in a
   **public Azure DNS zone**: DNS-01 only writes `_acme-challenge` TXT records
@@ -249,7 +252,8 @@ the gateway trusts the HTTPS backends. This removes the self-signed **502**.
   `--dns01-recursive-nameservers-only --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53`.
 - **Public mode** uses the add-on's gateway, which Terraform doesn't manage, so
   the CA is **not** uploaded there and self-signed public mode still returns
-  502. Use Let's Encrypt for a public UI.
+  502 until its private root is installed manually. Use Let's Encrypt or a
+  supplied publicly trusted certificate to avoid that upload.
 - **No usable DNS yet.** `node scripts/ui-proxy.mjs` from a machine with
   cluster access reaches the UI through port-forwards, bypassing the gateway.
 

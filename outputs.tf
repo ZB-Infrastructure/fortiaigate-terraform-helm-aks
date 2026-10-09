@@ -34,8 +34,8 @@ output "ingress_host" {
 }
 
 output "tls_ca_certificate" {
-  description = "PEM of the per-deployment CA that signs the self-signed serving cert (empty with Let's Encrypt). Import it into clients' trust stores to remove the browser warning; it is regenerated on every rebuild. Public certificate, not a secret."
-  value       = var.letsencrypt_enabled ? "" : tls_self_signed_cert.ca[0].cert_pem
+  description = "PEM root CA for web/API HTTPS: generated CA by default, supplied root CA when configured, or empty for publicly trusted certificates. Import private CAs into client trust stores. Public certificate, not a secret."
+  value       = local.web_trusted_root
 }
 
 output "appgw_private_ip" {
@@ -60,4 +60,9 @@ output "ingress_address" {
     ),
     "not yet assigned — run: kubectl get ingress fortiaigate-ingress -n ${var.namespace}"
   )
+}
+
+output "internal_tls_ca_certificate" {
+  description = "Public generated CA certificate for internal services and database TLS in every certificate mode. Separate from web/API trust when using supplied certificates or Let's Encrypt."
+  value       = tls_self_signed_cert.ca[0].cert_pem
 }

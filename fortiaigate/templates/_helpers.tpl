@@ -110,3 +110,41 @@ Keep the scanner list here aligned with templates/scanners.yaml line 11.
 {{- end -}}
 {{- $result | toJson -}}
 {{- end }}
+
+{{/* Internal serving certificate defaults to the shared application secret. */}}
+{{- define "fortiaigate.internalTlsSecretName" -}}
+{{- default (include "fortiaigate.tlsSecretName" .) .Values.tls.internalExistingSecret -}}
+{{- end }}
+
+{{- define "fortiaigate.internalTlsChecksum" -}}
+{{- default (include "fortiaigate.tlsChecksum" .) .Values.tls.internalExistingSecretChecksum -}}
+{{- end }}
+
+{{- define "fortiaigate.dbTlsMountPath" -}}
+{{- if .Values.tls.internalExistingSecret -}}
+{{- .Values.tls.internalMountPath -}}
+{{- else -}}
+{{- .Values.tls.mountPath -}}
+{{- end -}}
+{{- end }}
+
+{{- define "fortiaigate.dbTlsCAFile" -}}
+{{- if .Values.tls.internalExistingSecret -}}ca.crt{{- else -}}tls.crt{{- end -}}
+{{- end }}
+
+{{/* Database TLS has a separate volume only when an internal secret is set. */}}
+{{- define "fortiaigate.dbTlsVolumeMount" -}}
+{{- if and .Values.tls.internalExistingSecret (or .Values.redis.tls.enabled .Values.postgresql.tls.enabled) }}
+- name: internal-tls-certs
+  mountPath: {{ .Values.tls.internalMountPath | quote }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "fortiaigate.dbTlsVolume" -}}
+{{- if and .Values.tls.internalExistingSecret (or .Values.redis.tls.enabled .Values.postgresql.tls.enabled) }}
+- name: internal-tls-certs
+  secret:
+    secretName: {{ include "fortiaigate.internalTlsSecretName" . }}
+{{- end }}
+{{- end }}

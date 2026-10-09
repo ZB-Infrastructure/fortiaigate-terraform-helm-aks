@@ -177,6 +177,87 @@ class HelmContracts(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             render("certmanager-issuer", {})
 
+    def test_separate_web_and_internal_tls(self):
+        values = copy.deepcopy(BASE)
+        values["tls"].update({
+            "existingSecretChecksum": "web-cert-1",
+            "internalExistingSecret": "fortiaigate-internal-tls-secret",
+            "internalExistingSecretChecksum": "internal-cert-1",
+            "internalMountPath": "/etc/internal-tls",
+            "reloaderEnabled": True,
+        })
+        values["postgresql"]["tls"]["certificatesSecret"] = "fortiaigate-internal-tls-secret"
+        values["redis"]["tls"].update({
+            "existingSecret": "fortiaigate-internal-tls-secret", "certCAFilename": "ca.crt",
+        })
+        docs = render("fortiaigate", values)
+        for name in ("core", "api", "logd", "license-manager"):
+            with self.subTest(name=name):
+                doc = docs.get(("Deployment", name)) or docs["DaemonSet", name]
+                pod = doc["spec"]["template"]["spec"]
+                container = pod["containers"][0]
+                env = {e["name"]: e.get("value") for e in container["env"]}
+                self.assertEqual(env["REDIS_SSL_ENABLED"], "true")
+                self.assertEqual(env["REDIS_SSL_CERTFILE"], "/etc/internal-tls/tls.crt")
+                self.assertEqual(env["REDIS_SSL_KEYFILE"], "/etc/internal-tls/tls.key")
+                self.assertEqual(env["REDIS_SSL_CA_CERTS"], "/etc/internal-tls/ca.crt")
+                if name != "license-manager":
+                    self.assertEqual(env["POSTGRES_SSL_ENABLED"], "true")
+                    self.assertEqual(env["POSTGRES_SSL_CA_CERTS"], "/etc/internal-tls/ca.crt")
+                volumes = {v["name"]: v for v in pod["volumes"]}
+                self.assertEqual(volumes["internal-tls-certs"]["secret"]["secretName"],
+                                 "fortiaigate-internal-tls-secret")
+                serving = "fortiaigate-tls-secret" if name in ("core", "api") else "fortiaigate-internal-tls-secret"
+                self.assertEqual(volumes["tls-certs"]["secret"]["secretName"], serving)
+                mounts = {m["name"]: m for m in container["volumeMounts"]}
+                self.assertEqual(mounts["internal-tls-certs"]["mountPath"], "/etc/internal-tls")
+        for name in ("core", "api", "webui"):
+            doc = docs["Deployment", name]
+            self.assertEqual(doc["metadata"]["annotations"]["secret.reloader.stakater.com/reload"],
+                             "fortiaigate-tls-secret")
+        for name in ("language-scanner", "code-scanner"):
+            pod = docs["Deployment", name]["spec"]["template"]
+            self.assertEqual(pod["metadata"]["annotations"]["checksum/tls"], "internal-cert-1")
+            self.assertEqual(next(v for v in pod["spec"]["volumes"] if v["name"] == "tls-certs")
+                             ["secret"]["secretName"], "fortiaigate-internal-tls-secret")
+        for name in ("fortiaigate-postgresql", "fortiaigate-redis-master"):
+            pod = docs["StatefulSet", name]["spec"]["template"]["spec"]
+            secret_names = [v["secret"]["secretName"] for v in pod["volumes"] if "secret" in v]
+            self.assertIn("fortiaigate-internal-tls-secret", secret_names)
+            self.assertNotIn("fortiaigate-tls-secret", secret_names)
+
+    def test_internal_tls_rollouts_are_independent_of_web_certificate(self):
+        values = copy.deepcopy(BASE)
+        values["tls"].update({"existingSecretChecksum": "web-1",
+                              "internalExistingSecret": "internal-secret",
+                              "internalExistingSecretChecksum": "internal-1"})
+        before = render("fortiaigate", values)
+        values["tls"]["existingSecretChecksum"] = "web-2"
+        after = render("fortiaigate", values)
+        for name in ("core", "api", "webui"):
+            self.assertNotEqual(before["Deployment", name]["spec"]["template"],
+                                after["Deployment", name]["spec"]["template"])
+        for kind, name in (("Deployment", "logd"), ("DaemonSet", "license-manager"),
+                           ("Deployment", "language-scanner")):
+            self.assertEqual(before[kind, name]["spec"]["template"],
+                             after[kind, name]["spec"]["template"])
+
+    def test_shared_tls_fallback_and_disabled_database_tls(self):
+        docs = render("fortiaigate", BASE)
+        pod = docs["Deployment", "core"]["spec"]["template"]["spec"]
+        env = {e["name"]: e.get("value") for e in pod["containers"][0]["env"]}
+        self.assertEqual(env["REDIS_SSL_CA_CERTS"], "/etc/tls/tls.crt")
+        self.assertNotIn("internal-tls-certs", {v["name"] for v in pod["volumes"]})
+        values = copy.deepcopy(BASE)
+        values["tls"]["internalExistingSecret"] = "internal-secret"
+        values["postgresql"]["tls"]["enabled"] = False
+        values["redis"]["tls"]["enabled"] = False
+        docs = render("fortiaigate", values)
+        for name in ("core", "api", "logd", "license-manager"):
+            doc = docs.get(("Deployment", name)) or docs["DaemonSet", name]
+            pod = doc["spec"]["template"]["spec"]
+            self.assertNotIn("internal-tls-certs", {v["name"] for v in pod["volumes"]})
+
 
 if __name__ == "__main__":
     unittest.main()

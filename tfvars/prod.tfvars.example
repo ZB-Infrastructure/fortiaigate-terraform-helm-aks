@@ -59,3 +59,9 @@ licenses = {
   # "aks-app-12345678-vmss000001" = "licenses/APP2.lic"
   # "aks-gpu-12345678-vmss000000" = "licenses/GPU.lic"
 }
+
+# Optional supplied web/API TLS (mutually exclusive with letsencrypt_enabled).
+# Generated internal service/database TLS remains enabled in every mode.
+# tls_certificate_path    = "/secure/certs/fortiaigate-fullchain.pem"
+# tls_private_key_path    = "/secure/certs/fortiaigate.key"
+# tls_ca_certificate_path = "/secure/certs/company-root-ca.pem" # Private CA only

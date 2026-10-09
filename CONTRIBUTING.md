@@ -50,6 +50,7 @@ tflint --init
 tflint --recursive
 python3 -m pip install -r tests/requirements.txt
 python3 -m unittest discover -s tests -v
+python3 scripts/test_tls.py # Requires Terraform 1.7+ and OpenSSL
 ```
 
 CI runs formatting, validation, TFLint, and Helm rendering checks on every PR (`.github/workflows/terraform.yml`).

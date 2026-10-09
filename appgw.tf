@@ -58,16 +58,14 @@ resource "azurerm_application_gateway" "this" {
     subnet_id = azurerm_subnet.appgw.id
   }
 
-  # The per-deployment CA from tls.tf, so the gateway trusts the HTTPS backends
-  # (without it every backend is unhealthy -> 502). Referenced from the Ingress
-  # by local.appgw_trusted_root_values in helm.tf. Not needed with Let's Encrypt
-  # (a well-known CA chain). Terraform keeps managing this block -- AGIC only
-  # references trusted roots by name, it never writes them.
+  # Generated or supplied private web CA, so the gateway trusts HTTPS backends.
+  # The ingress references this root by name. Publicly trusted certificates
+  # need no upload. Terraform owns this block; AGIC only references it.
   dynamic "trusted_root_certificate" {
-    for_each = var.letsencrypt_enabled ? [] : [1]
+    for_each = local.web_has_private_ca ? [1] : []
     content {
       name = local.appgw_trusted_root_name
-      data = base64encode(tls_self_signed_cert.ca[0].cert_pem)
+      data = base64encode(local.web_trusted_root)
     }
   }
 

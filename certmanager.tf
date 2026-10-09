@@ -2,8 +2,8 @@
 # authenticated through workload identity (no service-principal secret).
 #
 # This whole file is gated on var.letsencrypt_enabled. When false it resolves
-# to zero resources and tls.tf's self-signed certificate is used instead, so
-# the default behaviour is unchanged.
+# to zero resources; Terraform owns the generated or supplied web certificate.
+# Internal service/database TLS is generated independently in every mode.
 #
 # When true:
 #   - cert-manager is installed and its controller assumes a user-assigned

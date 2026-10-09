@@ -268,8 +268,41 @@ variable "appgw_private_ip" {
 # Let's Encrypt / cert-manager (optional, default off)
 # ----------------------------------------------------------------------------
 
+variable "tls_certificate_path" {
+  description = "Optional PEM serving certificate chain (leaf first, then intermediates) for web/API HTTPS. Requires tls_private_key_path and ingress_host; mutually exclusive with letsencrypt_enabled. Internal services and databases retain generated TLS certificates."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.tls_certificate_path == "" ? true : can(regex("-----BEGIN CERTIFICATE-----", file(var.tls_certificate_path)))
+    error_message = "tls_certificate_path must point to a readable PEM certificate chain."
+  }
+}
+
+variable "tls_private_key_path" {
+  description = "Path to the unencrypted PEM private key matching tls_certificate_path. Its contents are stored in Terraform state; protect the state and keep the file outside version control."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.tls_private_key_path == "" ? true : can(regex("-----BEGIN (RSA |EC )?PRIVATE KEY-----", file(var.tls_private_key_path)))
+    error_message = "tls_private_key_path must point to a readable, unencrypted PEM private key."
+  }
+}
+
+variable "tls_ca_certificate_path" {
+  description = "Optional PEM root CA certificate for supplied web/API certificates signed by a private CA. Uploaded automatically only to the Terraform-managed private Application Gateway; configure public add-on gateways manually. Omit for a publicly trusted certificate. This is a public certificate, never a CA private key."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.tls_ca_certificate_path == "" ? true : can(regex("-----BEGIN CERTIFICATE-----", file(var.tls_ca_certificate_path)))
+    error_message = "tls_ca_certificate_path must point to a readable PEM root CA certificate."
+  }
+}
+
 variable "letsencrypt_enabled" {
-  description = "Install cert-manager and issue a browser-trusted Let's Encrypt certificate into fortiaigate-tls-secret via ACME DNS-01 against Azure DNS (workload-identity auth). When true, cert-manager owns the TLS secret instead of the self-signed cert in tls.tf, which also makes AGIC trust the HTTPS backend (the well-known CA chain) and serve a trusted frontend cert. Requires an existing public Azure DNS zone and ingress_host set."
+  description = "Install cert-manager and issue a Let's Encrypt web/API certificate via Azure DNS-01. Requires an existing public Azure DNS zone and ingress_host, and is mutually exclusive with tls_certificate_path. Internal services and databases retain generated TLS certificates."
   type        = bool
   default     = false
 }
