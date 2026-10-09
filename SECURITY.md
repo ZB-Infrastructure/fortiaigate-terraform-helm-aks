@@ -16,24 +16,19 @@ Include:
 - Steps to reproduce or a proof-of-concept
 - Your suggested remediation, if any
 
-Fortinet PSIRT will acknowledge your report within 5 business days and coordinate disclosure.
-
 ## Scope
 
-This policy covers the Terraform and Helm code in this repository, including:
-
-- Default IAM policies attached by the modules
-- Default network exposure (security groups, ALB schemes, EKS endpoint access)
-- Default secret handling (TLS certificates, license storage)
-
-It does **not** cover vulnerabilities in upstream dependencies (Terraform providers, third-party Helm charts, AWS-managed addons) — report those to the relevant upstream project. It also does not cover FortiAIGate container image vulnerabilities, which are reported through the standard Fortinet support channels.
+This policy covers the Terraform infrastructure and local Helm changes in this repository, including Azure RBAC, AKS API access, Application Gateway exposure, storage access, TLS, and deployment secret handling. Report upstream provider/chart vulnerabilities to their maintainers; report FortiAIGate container vulnerabilities through Fortinet support or PSIRT.
 
 ## Production hardening
 
-The defaults in this repository favor ease of evaluation, not production security posture. Before deploying to a production environment, review at minimum:
+The defaults support evaluation. Before production deployment, review:
 
-- `cluster_endpoint_public_access` — `true` by default; restrict to known CIDRs or disable in favor of private endpoint access
-- `single_nat_gateway` — `true` by default; set to `false` for multi-AZ resilience
-- Self-signed TLS in `tls.tf` — replace with ACM or cert-manager-issued certificates
-- EFS encryption (`efs_encrypted`) — defaults to `true`, but uses the AWS-managed key; use a customer-managed KMS key for production
-- IAM scopes attached via the EKS, EFS CSI, and ALB controller IRSA modules — review the AWS-managed policies used and apply least-privilege overrides where appropriate
+- AKS API access and authentication. This stack currently uses AKS client certificates and does not expose API CIDR restrictions, private-cluster settings, or Entra ID integration as deployment inputs. Private application ingress does not make the AKS API private.
+- Application Gateway exposure. Choose `internal` before deployment, review subnet/NSG routing, and verify backend trust using [the gateway guide](docs/application-gateway-dns-tls.md).
+- Certificates. Web TLS supports generated material, supplied PEM, or cert-manager. Internal services always use a generated deployment CA and a separate leaf. Protect private keys in state and qualify internal renewal and rollout. See [supplied TLS](docs/tls-supplied.md) and [Let's Encrypt](docs/tls-letsencrypt.md).
+- Azure Files network access and shared-key authentication, dedicated Azure Disk database storage, encryption controls, and backup/restore. Storage account destruction deletes shared data even with a retained PV.
+- Azure role assignments for the deployment principal, AKS identities, AGIC, ACR, storage, and cert-manager. Scope access to the required resources and review grants outside the deployment resource group.
+- Application Secrets and Terraform state. Preserve PostgreSQL/Redis credentials, CSRF, and the master encryption key against retained data. Keep state, backups, keys, licenses, and local tfvars out of version control.
+
+See [operations](docs/operations.md), [testing](docs/testing.md), and [the roadmap](ROADMAP.md) for qualification and remaining gaps.

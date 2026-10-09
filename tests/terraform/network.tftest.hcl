@@ -99,7 +99,6 @@ run "existing_public" {
     agic_enabled             = true
     ingress_class            = "azure-application-gateway"
     gpu_enabled              = true
-    licenses                 = { aks-gpu-test = "test-cert.pem" }
     service_cidr             = "172.20.0.0/16"
     dns_service_ip           = "172.20.0.10"
   }
@@ -130,7 +129,6 @@ run "existing_private" {
     agic_enabled             = true
     ingress_class            = "azure-application-gateway"
     gpu_enabled              = true
-    licenses                 = { aks-gpu-test = "test-cert.pem" }
     service_cidr             = "172.20.0.0/16"
     dns_service_ip           = "172.20.0.10"
   }
@@ -164,7 +162,6 @@ run "existing_without_agic" {
     agic_enabled           = false
     ingress_class          = "nginx"
     gpu_enabled            = true
-    licenses               = { aks-gpu-test = "test-cert.pem" }
     service_cidr           = "172.20.0.0/16"
     dns_service_ip         = "172.20.0.10"
   }

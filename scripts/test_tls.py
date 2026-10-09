@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run mocked TLS tests from a temporary checkout without local state/tfvars.
+"""Run mocked TLS, network, and GPU tests from a temporary checkout without local state/tfvars.
 
 Requires Terraform 1.7+ and OpenSSL. Run terraform init -backend=false first
 so the locked provider binaries are available. No remote resources are created.
@@ -46,7 +46,9 @@ resource "azurerm_kubernetes_cluster" "this" {
             "terraform", "init", "-backend=false", "-lockfile=readonly", "-no-color",
             "-plugin-dir=" + str(ROOT / ".terraform/providers"),
         ], cwd=target, check=True)
-        subprocess.run(["terraform", "validate", "-no-color"], cwd=target, check=True)
+        subprocess.run([
+            "terraform", "validate", "-no-color",
+        ], cwd=target, check=True)
         subprocess.run([
             "terraform", "test", "-test-directory=tests/terraform", "-no-color",
         ], cwd=target, check=True)

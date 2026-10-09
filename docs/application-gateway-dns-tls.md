@@ -1,13 +1,9 @@
 # Application Gateway, DNS, and TLS
 
-This stack's Azure equivalent of the AWS `ALB + Route 53 + ACM` pattern is:
-
-| AWS | Azure |
-|-----|-------|
-| Application Load Balancer | Application Gateway managed by AGIC |
-| Route 53 hosted zone | Azure DNS zone, or whichever DNS provider owns the zone |
-| Route 53 alias/A record | `A` record pointing at the Application Gateway public IP |
-| ACM certificate | Kubernetes TLS secret, cert-manager-managed secret, or an Application Gateway SSL certificate |
+Application Gateway provides ingress through AGIC. Azure DNS or another DNS
+provider maps the application hostname to its frontend IP. Web certificates
+come from Terraform-generated material, supplied PEM files, or cert-manager;
+internal database/service TLS has independent certificate ownership.
 
 ## Public UI flow
 

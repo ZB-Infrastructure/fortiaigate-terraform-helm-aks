@@ -5,9 +5,10 @@ This guidance applies to coding agents working in this repository.
 ## Scope and constraints
 
 - This repository deploys FortiAIGate on Azure AKS using Terraform and local Helm charts. Application source and container images are maintained elsewhere.
-- Preserve the AKS chart's ingress, TLS, licensing, storage, and GPU placement patches when importing upstream builds. Do not replace `fortiaigate/` wholesale or assume it matches the EKS chart.
+- Preserve the AKS chart's ingress, TLS, licensing, storage, and GPU placement patches when importing upstream builds. Do not replace `fortiaigate/` wholesale or discard local platform patches.
 - Keep generated Terraform resource addresses stable during upgrades. Terraform owns PostgreSQL credentials and internal TLS; web TLS uses generated material, supplied PEM files, or cert-manager.
-- Keep shared RWX storage on Azure Files and database storage on dedicated Azure Disks. Preserve licensed-hostname affinity and the GPU pool's explicit `gpu_driver = "Install"` setting.
+- Keep shared RWX storage on Azure Files and database storage on dedicated Azure Disks. Build0055 uses deployment licenses: preserve app/GPU pool placement without node-license affinity, and keep the GPU pool's explicit `gpu_driver = "Install"` setting.
+- Terraform owns the credential encryption key, CSRF key, and Redis password as well as PostgreSQL credentials. Preserve their resource addresses and never regenerate them against retained data.
 - Inspect value precedence in `helm.tf` before changing chart defaults or adding overrides. Later values win, and Terraform `set` blocks have final precedence.
 - Keep deployment procedures and troubleshooting in `docs/`; link to them here instead of duplicating them. Update the relevant docs and changelog when behavior changes.
 - Keep credentials, licenses, PEM keys, kubeconfigs, local tfvars, state, plans, and rendered manifests out of version control.
@@ -15,7 +16,10 @@ This guidance applies to coding agents working in this repository.
 ## Where to read
 
 - [README](README.md): deployment overview, two-step bootstrap, subscription layout, variables, and teardown.
-- [Contributing](CONTRIBUTING.md): local checks, generated README tables, and PR requirements.
+- [Contributing](CONTRIBUTING.md): local checks, generated Terraform reference, and PR requirements.
+- [8.0.1 to 8.0.2 upgrade](docs/upgrade-8.0.1-to-8.0.2.md): migration prerequisites, secret adoption, cutover, and recovery.
+- [Deployment](docs/deployment-guide.md), [technical notes](docs/technical-notes.md), [Terraform reference](docs/terraform-reference.md), and [teardown](docs/teardown.md): configuration, implementation constraints, inputs, and removal.
+- [Build0055 port notes](docs/build0055-compatibility.md): release evidence and upgrade expectations.
 - [Operations and upgrades](docs/operations.md): credential adoption, licensing, storage constraints, and rollout behavior.
 - [Application Gateway, DNS, and TLS](docs/application-gateway-dns-tls.md): gateway ownership, private ingress, and backend trust.
 - [Supplied certificates](docs/tls-supplied.md) and [Let's Encrypt](docs/tls-letsencrypt.md): web/internal TLS separation and renewal.

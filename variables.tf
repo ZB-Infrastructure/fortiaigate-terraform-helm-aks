@@ -23,23 +23,13 @@ variable "kubernetes_version" {
 }
 
 variable "app_node_vm_size" {
-  # Node-keyed licensing puts every app pod on the licensed app node(s); the
-  # build0031 service set requests ~12 vCPU / ~24 GiB, so a 16-vCPU size is the
-  # practical floor for a single app node. Set before the first deploy:
-  # resizing the default pool in place needs azurerm's temporary_name_for_rotation
-  # (not set here), and a resized node gets a new name -> re-key var.licenses.
-  description = "Azure VM size for the application node pool. With one licensed app node all app pods run on it (~12 vCPU / ~24 GiB requested), so 16 vCPU (Standard_D16s_v5) is the practical minimum."
+  description = "Azure VM size for the application pool. Size for application requests and database resources; deployment licenses no longer bind workloads to node names."
   type        = string
   default     = "Standard_D16s_v5"
 }
 
 variable "app_node_count" {
-  # Number of LICENSED application nodes. FortiAIGate node-keyed licensing pins
-  # every pod to licensed nodes (hostname nodeAffinity), so this should equal
-  # the number of app-node licenses you have — extra unlicensed nodes can't run
-  # workload. With a single app license, keep this at 1 and rely on
-  # app_node_max_pods to fit the full service set on the one node.
-  description = "Number of licensed application nodes (must match available app-node licenses)"
+  description = "Number of application nodes (independent of deployment licensing)"
   type        = number
   default     = 1
 
@@ -50,12 +40,7 @@ variable "app_node_count" {
 }
 
 variable "app_node_max_pods" {
-  # Azure CNI defaults to 30 pods/node. The full FortiAIGate service set plus
-  # system daemonsets exceeds that, and node-keyed licensing forces them all
-  # onto the single licensed app node — so the cap must be raised. Set at node
-  # pool creation (ForceNew). Classic Azure CNI draws one subnet IP per pod, so
-  # max_pods * max nodes must fit in aks_subnet_cidr (/20 = 4096, ample).
-  description = "Max pods per application node (Azure CNI default 30 is too low for the full service set on one licensed node)"
+  description = "Max pods per application node; account for application/system pods and Azure CNI subnet capacity"
   type        = number
   default     = 110
 }
@@ -67,7 +52,7 @@ variable "app_node_disk_size_gb" {
 }
 
 variable "gpu_enabled" {
-  description = "Add a GPU node pool for Triton inference. When false, triton is disabled and all workloads run CPU-only."
+  description = "Add a GPU pool for Triton and vLLM. When false, Triton still renders without GPU allocation and vLLM is disabled; POLICY detectors require vLLM and fail closed without it. CPU capabilities need live qualification."
   type        = bool
   default     = false
 }
@@ -77,7 +62,7 @@ variable "gpu_node_vm_size" {
   # (Turing or newer) — rules out the V100/NCsv3; and (2) the FortiAIGate
   # deployment spec requires a supported model (NVIDIA L4/A10/A100) with >=24 GB VRAM —
   # which rules out the 16 GB T4. On Azure that intersection is the A10
-  # (NV36ads_A10_v5, 24 GB) or A100. A10 matches the A10G the EKS stack runs.
+  # (NV36ads_A10_v5, 24 GB) or A100. Qualify combined inference on the selected SKU.
   # See docs/gpu-triton-compatibility.md.
   description = "Azure VM size for the GPU node pool. Must be a Fortinet-supported GPU (A10/A100; L4 unavailable on Azure) with >=24 GB VRAM AND SM 75+. Default Standard_NV36ads_A10_v5 (A10, 24 GB). NOTE: A10/A100 families default to 0 quota — request a quota increase first (see docs/gpu-triton-compatibility.md)."
   type        = string
@@ -88,6 +73,93 @@ variable "gpu_node_disk_size_gb" {
   description = "OS disk size (GB) for GPU nodes"
   type        = number
   default     = 250
+}
+
+variable "gpu_node_count" {
+  description = "Fixed GPU pool size. Dedicated Triton/vLLM mode needs enough cards for both engines (normally at least two one-GPU nodes)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.gpu_node_count >= 1 && floor(var.gpu_node_count) == var.gpu_node_count
+    error_message = "gpu_node_count must be a positive integer."
+  }
+}
+
+variable "vllm_gpu_attach" {
+  description = "Explicit GPU topology: shared runs Triton/vLLM in one pod; dedicated gives each engine its own GPU allocation. Shared mode requires live AKS NVIDIA runtime qualification."
+  type        = string
+  default     = "shared"
+
+  validation {
+    condition     = contains(["shared", "dedicated"], var.vllm_gpu_attach)
+    error_message = "vllm_gpu_attach must be shared or dedicated."
+  }
+}
+
+variable "vllm_image_tag" {
+  description = "Tag for the vLLM server and GPU-probe image. Qualify changes together with Triton and faig-models."
+  type        = string
+  default     = "0.28.0-rpt-s1"
+}
+
+variable "gpu_tuning_profile" {
+  description = "Inference defaults: auto selects a10 for Azure A10 VMs and chart otherwise; a10 preserves shared inference settings; chart retains vendor defaults."
+  type        = string
+  default     = "auto"
+
+  validation {
+    condition     = contains(["auto", "a10", "chart"], var.gpu_tuning_profile)
+    error_message = "gpu_tuning_profile must be auto, a10, or chart."
+  }
+}
+
+variable "gpu_tuning" {
+  description = "Optional inference overrides in tfvars. Unset fields inherit profile/chart values. Memory uses whole Mi/Gi quantities. Explicit fields override extra_values_files."
+  type = object({
+    triton_memory_request        = optional(string)
+    triton_memory_limit          = optional(string)
+    triton_dlp_instances_per_gpu = optional(number)
+    triton_dlp_max_batch_size    = optional(number)
+    vllm_memory_request          = optional(string)
+    vllm_memory_limit            = optional(string)
+    vllm_max_num_seqs            = optional(number)
+    vllm_api_server_count        = optional(number)
+    vllm_gpu_memory_utilization  = optional(number)
+    vllm_max_model_len           = optional(number)
+  })
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([for value in [
+      var.gpu_tuning.triton_memory_request, var.gpu_tuning.triton_memory_limit,
+      var.gpu_tuning.vllm_memory_request, var.gpu_tuning.vllm_memory_limit,
+    ] : value == null ? true : can(regex("^[1-9][0-9]*(Mi|Gi)$", value))])
+    error_message = "GPU memory overrides must be positive whole Mi/Gi quantities, e.g. 8192Mi or 12Gi."
+  }
+  validation {
+    condition = alltrue([for value in [
+      var.gpu_tuning.triton_dlp_instances_per_gpu, var.gpu_tuning.triton_dlp_max_batch_size,
+      var.gpu_tuning.vllm_max_num_seqs, var.gpu_tuning.vllm_api_server_count,
+      var.gpu_tuning.vllm_max_model_len,
+    ] : value == null ? true : value >= 1 && floor(value) == value])
+    error_message = "GPU instance counts, batch sizes, concurrency, API process counts, and context lengths must be positive whole numbers."
+  }
+  validation {
+    condition     = var.gpu_tuning.vllm_gpu_memory_utilization == null ? true : var.gpu_tuning.vllm_gpu_memory_utilization > 0 && var.gpu_tuning.vllm_gpu_memory_utilization < 1
+    error_message = "vllm_gpu_memory_utilization must be greater than 0 and less than 1."
+  }
+  validation {
+    condition = alltrue([for pair in [
+      [var.gpu_tuning.triton_memory_request, var.gpu_tuning.triton_memory_limit],
+      [var.gpu_tuning.vllm_memory_request, var.gpu_tuning.vllm_memory_limit],
+      ] : pair[0] == null || pair[1] == null ? true : try(
+      tonumber(regex("^([0-9]+)", pair[0])[0]) * (endswith(pair[0], "Gi") ? 1024 : 1) <=
+      tonumber(regex("^([0-9]+)", pair[1])[0]) * (endswith(pair[1], "Gi") ? 1024 : 1), false
+    )])
+    error_message = "An explicit GPU memory request must not exceed its explicit limit."
+  }
 }
 
 variable "image_repository" {
@@ -107,21 +179,21 @@ variable "acr_id" {
 }
 
 variable "image_tag" {
-  description = "Image tag for FortiAIGate application services (api, core, webui, logd, license_manager, scanner); Triton and its model image use separate tags."
+  description = "Image tag for FortiAIGate application services (api, llm-gateway, webui, logd, license_manager, guardrail, guardrail-scanner); Triton and its model image use separate tags."
   type        = string
-  default     = "V8.0.1-build0031"
+  default     = "V8.0.2-build0055"
 }
 
 variable "triton_image_tag" {
-  description = "Tag for the custom-triton inference server image when GPU is enabled. Must match the image pushed to the registry."
+  description = "Tag for the custom-triton inference server image in CPU/GPU profiles. Must match the image pushed to the registry."
   type        = string
-  default     = "25.11-onnx-trt-agt-s1"
+  default     = "25.11-onnx-trt-agt-rpt-s1"
 }
 
 variable "triton_models_image_tag" {
-  description = "Tag for the triton-models image when GPU is enabled. Must match the image pushed to the registry."
+  description = "Tag for the combined faig-models carrier used by Triton and vLLM. Must match the image pushed to the registry."
   type        = string
-  default     = "0.1.6-s1"
+  default     = "0.0.5-s1"
 }
 
 variable "namespace" {
@@ -216,20 +288,20 @@ variable "storage_account_kind" {
   }
 }
 
+# Retained only to reject obsolete tfvars; its validation is its only use.
+# tflint-ignore: terraform_unused_declarations
 variable "licenses" {
-  description = "Map of AKS node name to local license file path. Node names are available after cluster creation via 'kubectl get nodes'. Example: { \"aks-app-12345678-vmss000000\" = \"/path/to/license.lic\" }"
+  description = "Deprecated node-keyed license map. Must be empty for build0055; upload a deployment license through the admin API after installation."
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = length(var.licenses) == 0
+    error_message = "FortiAIGate 8.0.2 no longer accepts node-keyed license files. Remove licenses from tfvars and upload a deployment license through POST /api/v1/admin/licenses. Existing deployments need a qualified migration."
+  }
 }
 
 variable "helm_timeout" {
-  # The helm provider wraps the release install/upgrade in a context with this
-  # deadline (seconds). On a FIRST apply the nodes pull ~15 app images + Triton
-  # fresh from ACR, which can exceed the old 1200s and surface as "context
-  # deadline exceeded" — a re-apply then succeeds because the images are cached.
-  # Raised default gives first-pull headroom; bump higher for slow/distant ACRs.
-  # NOTE: this does not help when the hang is the licensing 503 on `core` (a
-  # stuck "In Use" seat) — that's a hard block a longer timeout won't clear.
   description = "Seconds the helm provider waits for the fortiaigate release to become ready before erroring with 'context deadline exceeded'"
   type        = number
   default     = 2400
