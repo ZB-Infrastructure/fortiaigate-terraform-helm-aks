@@ -16,6 +16,9 @@ For security vulnerabilities, do **not** open a public issue — see [SECURITY.m
 
 ## Development setup
 
+Coding agents should follow [AGENTS.md](AGENTS.md). Deployment troubleshooting
+and upgrade constraints are documented in [Operations and upgrades](docs/operations.md).
+
 You need:
 
 - Terraform 1.5+

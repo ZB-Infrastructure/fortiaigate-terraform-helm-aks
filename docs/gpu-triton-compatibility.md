@@ -98,7 +98,7 @@ az vm list-usage --location westus -o table | grep -iE 'NVADSA10v5|NCADS_A100_v4
    (`aks-gpu-<newhash>-vmss000000`), which **re-keys node-affinity licensing**.
    After the new node joins, update the GPU entry in `var.licenses` to the new
    node name and re-apply — same post-apply step as the initial deploy. See the
-   node-keyed licensing notes in `CLAUDE.md`.
+   [node-keyed licensing notes](operations.md#node-keyed-licensing).
 
 3. Confirm the node's GPU and that Triton's TensorRT engine builds:
 

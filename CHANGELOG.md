@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Replace duplicated Claude-specific guidance with shared `AGENTS.md` instructions and an operations/upgrade guide.
 - Support supplied PEM web/API certificates and optional private root CA trust for Application Gateway.
 - Separate internal service/database TLS from web certificates and retain database TLS in Let's Encrypt mode.
 - Add certificate preflight validation, mocked Terraform TLS tests, and Helm checks for independent secrets and rollouts.

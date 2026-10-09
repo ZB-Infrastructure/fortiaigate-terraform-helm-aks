@@ -166,6 +166,7 @@ tfvars example is a starting configuration, not a high-availability guarantee.
 
 ## Documentation
 
+- [Operations and upgrades](docs/operations.md) — credential adoption, licensing, storage constraints, and rollouts.
 - [Supplied TLS certificates](docs/tls-supplied.md) — use your own certificate while retaining internal database TLS.
 - [Application Gateway, DNS, and TLS](docs/application-gateway-dns-tls.md) — Azure equivalent of ALB + Route 53 + ACM.
 - [Container registry and image upload](docs/registry-and-images.md) — ACR, image push, and `AcrPull`.

@@ -31,6 +31,11 @@ certificate issuance.
 
 ## Live deployment tests
 
+Previous repository notes recorded a clean 8.0.0 deployment on 2026-05-28 using
+AKS 1.35, one licensed app node with a 110-pod cap, one A10 GPU node, and
+PostgreSQL on `managed-csi`. This is historical evidence for that configuration;
+it does not validate the 8.0.1/build0031 chart or the current TLS changes.
+
 Use a dedicated test subscription/resource group and follow the README's
 two-step bootstrap. These operations create billable Azure resources.
 
