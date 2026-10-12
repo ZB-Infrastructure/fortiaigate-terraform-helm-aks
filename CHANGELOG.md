@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Support externally owned VNets and AKS/Application Gateway subnets, pre-grant AKS network access, and configure Kubernetes service/DNS ranges. Preserve managed-network state with moved declarations.
+
 - Replace duplicated Claude-specific guidance with shared `AGENTS.md` instructions and an operations/upgrade guide.
 - Support supplied PEM web/API certificates and optional private root CA trust for Application Gateway.
 - Separate internal service/database TLS from web certificates and retain database TLS in Let's Encrypt mode.

@@ -89,3 +89,20 @@ licenses, keys, kubeconfigs, state, plans, and rendered manifests. Build source
 archives from committed files (`git archive`) rather than archiving the working
 directory. Record the tested Azure region, AKS version, image tag, TLS mode,
 CPU/GPU results, and known limitations in the release notes.
+
+## Existing network validation
+
+On 2026-10-12, existing-network support on `main` passed isolated Terraform
+validation, 18 mocked Terraform runs (including eight network scenarios),
+14 Python/Helm/certificate tests using vendored subcharts, TFLint 0.53.0 with
+Azure ruleset 0.27.0, and Terraform formatting. The network scenarios cover
+managed defaults, external public/private gateways, AGIC disabled, app/GPU
+subnet placement, service/DNS overrides, and incomplete or inconsistent IDs.
+The existing test runner supplies a user-assigned identity/kubelet fixture
+because mocked plans do not populate AKS's optional kubelet block; it does not
+prove Azure identity creation or permission propagation.
+
+No live deployment was performed for this feature. Qualify external network
+RBAC, gateway connectivity, existing NSGs/routes/DNS, IP capacity, a second
+plan, and teardown that preserves external networking in a dedicated test
+environment using [the existing network guide](existing-network.md).
