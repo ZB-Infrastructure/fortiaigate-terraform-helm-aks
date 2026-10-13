@@ -1,0 +1,148 @@
+# Dev subscription — copy to tfvars/dev.tfvars and fill in real values.
+# Usage: terraform apply -var-file=tfvars/dev.tfvars
+
+# ---------------------------------------------------------------------------
+# Required
+# ---------------------------------------------------------------------------
+
+image_repository = "fortaigateacr.azurecr.io/fortiaigate"
+
+# Optional: grant the AKS kubelet identity AcrPull on the ACR so nodes can pull
+# images. Leave empty if the ACR (and its AcrPull grant) is managed in another
+# stack. When set, the Terraform SP needs role-assignment write (Owner or
+# User Access Administrator) on the ACR's scope.
+#   az acr show -n <acr-name> --query id -o tsv
+# acr_id = "/subscriptions/<sub>/resourceGroups/<acr-rg>/providers/Microsoft.ContainerRegistry/registries/<acr-name>"
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+
+location = "eastus"
+
+# resource_group_name is the cluster RG. This is the ONLY RG that
+# `terraform destroy` touches. Keep it distinct from:
+#   - the Terraform state RG (docs/remote-state.md, typically fortiaigate-tfstate)
+#   - the ACR RG (docs/registry-and-images.md, typically fortiaigate-acr)
+# Mixing any of these means `terraform destroy` takes out state or images.
+resource_group_name = "fortiaigate-eastus-rg"
+cluster_name        = "fortiaigate-dev"
+# build0031 image set from the supplied FortiAIGate release archives.
+# All three must match the images actually pushed to your registry.
+image_tag               = "V8.0.1-build0031"
+triton_image_tag        = "25.11-onnx-trt-agt-s1"
+triton_models_image_tag = "0.1.6-s1"
+
+# Number of LICENSED app nodes. Node-keyed licensing pins every pod to licensed
+# nodes, so keep this equal to your app-node license count (1 for a single
+# license). All app pods then run on the one app node — app_node_max_pods raises
+# the per-node cap so they fit (default 110; the Azure CNI default of 30 is too
+# low for the full service set + system daemonsets).
+app_node_count = 1
+# app_node_max_pods = 110
+
+# App node VM size. With one licensed app node, EVERY app pod lands on it: the
+# build0031 service set requests ~12 vCPU / ~24 GiB, so 16 vCPU (D16s_v5, 64 GiB)
+# is the practical minimum — an 8-vCPU size leaves pods Pending. Size up (e.g.
+# Standard_D32s_v5) for headroom. Set it BEFORE the first deploy: resizing the
+# default pool on a live cluster needs azurerm's temporary_name_for_rotation
+# (not set here), and any resize yields a new node name to re-key in `licenses`.
+app_node_vm_size = "Standard_D16s_v5"
+
+# ---------------------------------------------------------------------------
+# GPU support
+# ---------------------------------------------------------------------------
+
+gpu_enabled = true
+# GPU MUST be a Fortinet-supported model (A10/A100; L4 isn't an Azure VM SKU)
+# with >=24 GB VRAM AND compute capability SM 75+ (the Triton image's TensorRT 10
+# rejects the older V100/NC6s_v3 — wrong on both counts). A10 is the economical
+# fit and matches what the EKS stack runs (g5/A10G).
+# IMPORTANT: the A10/A100 vCPU quota families default to 0 in most regions —
+# request a quota increase BEFORE deploying or step 1 fails creating the pool.
+# See docs/gpu-triton-compatibility.md.
+gpu_node_vm_size = "Standard_NV36ads_A10_v5"
+
+# ---------------------------------------------------------------------------
+# Ingress (Application Gateway Ingress Controller)
+# ---------------------------------------------------------------------------
+# Public UI path: keep internal=false, set ingress_host, then create an Azure
+# DNS (or external DNS) A record to the Application Gateway public IP.
+# Internal-only path: set internal=true BEFORE the first deploy. Terraform then
+# creates the Application Gateway with a static private frontend and binds all
+# listeners to it; point internal DNS for ingress_host at
+# `terraform output appgw_private_ip`. See docs/application-gateway-dns-tls.md.
+
+agic_enabled  = true
+ingress_class = "azure-application-gateway"
+internal      = false
+ingress_host  = "fortiaigate.example.com"
+# appgw_private_ip = "10.0.64.254"  # internal=true only; default = second-to-last address of appgw_subnet_cidr
+
+# AGIC annotations. Terraform supplies backend-protocol=https and ssl-redirect
+# defaults; explicit annotations here override them:
+#   - backend-protocol: chart services speak HTTPS (tls.enabled = true)
+#   - ssl-redirect:     send HTTP -> HTTPS at the gateway
+#   - Health probes come from each backend pod readinessProbe. Do not set a
+#     global health-probe-path: core, api, and webui use different endpoints.
+#   - appgw-ssl-certificate: name of a cert installed on Application Gateway.
+#                            AGIC ignores this if the Ingress also has spec.tls;
+#                            see docs/application-gateway-dns-tls.md.
+ingress_annotations = {
+  "appgw.ingress.kubernetes.io/backend-protocol" = "https"
+  "appgw.ingress.kubernetes.io/ssl-redirect"     = "true"
+  # "appgw.ingress.kubernetes.io/appgw-ssl-certificate" = "<kv-cert-name>"
+}
+
+# ---------------------------------------------------------------------------
+# Let's Encrypt TLS (optional, default off)
+# ---------------------------------------------------------------------------
+# Automates a browser-trusted cert via cert-manager + ACME DNS-01 against an
+# existing public Azure DNS zone, authenticated with workload identity (no
+# secret). cert-manager then owns fortiaigate-tls-secret, which both serves the
+# trusted frontend cert AND makes AGIC trust the HTTPS backend (so no manual
+# trusted-root upload). Requires ingress_host (above) set to a name in the zone.
+# Full walkthrough: docs/tls-letsencrypt.md.
+#
+# letsencrypt_enabled     = true
+# letsencrypt_environment = "staging"   # validate first, then flip to "production"
+# acme_email              = "you@example.com"
+# dns_zone_name           = "example.com"
+# dns_zone_resource_group = "dns-rg"     # RG holding the DNS zone (may differ from cluster RG)
+# cert_manager_version    = "v1.16.2"
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+
+storage_size         = "100Gi"
+storage_account_tier = "Premium"
+storage_account_kind = "FileStorage"
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+# Node names are available after the cluster is created:
+#   kubectl get nodes -o custom-columns=NAME:.metadata.name,ROLE:.metadata.labels.fortiaigate-role --no-headers
+# AKS node names look like: aks-app-12345678-vmss000000 and aks-gpu-12345678-vmss000000.
+# If gpu_enabled = true, include the aks-gpu-* node too; Triton is pinned to
+# both the GPU node selector and licensed hostnames.
+
+licenses = {
+  # "aks-app-12345678-vmss000000" = "licenses/APP.lic"
+  # "aks-gpu-12345678-vmss000000" = "licenses/GPU.lic"
+}
+
+# Optional supplied web/API TLS (mutually exclusive with letsencrypt_enabled).
+# Generated internal service/database TLS remains enabled in every mode.
+# tls_certificate_path    = "/secure/certs/fortiaigate-fullchain.pem"
+# tls_private_key_path    = "/secure/certs/fortiaigate.key"
+# tls_ca_certificate_path = "/secure/certs/company-root-ca.pem" # Private CA only
+
+# Existing networking (all IDs in the deployment subscription and region).
+# Leave unset to create networking. See docs/existing-network.md.
+# existing_vnet_id         = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>"
+# existing_aks_subnet_id   = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<aks-subnet>"
+# existing_appgw_subnet_id = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<appgw-subnet>"
+# service_cidr   = "10.1.0.0/16"
+# dns_service_ip = "10.1.0.10"
