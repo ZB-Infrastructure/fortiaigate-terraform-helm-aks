@@ -1,0 +1,135 @@
+# Dev subscription — copy to tfvars/dev.tfvars and fill in real values.
+# Usage: terraform apply -var-file=tfvars/dev.tfvars
+
+# ---------------------------------------------------------------------------
+# Required
+# ---------------------------------------------------------------------------
+
+image_repository = "<acr-name>.azurecr.io/fortiaigate"
+
+# Optional: grant the AKS kubelet identity AcrPull on the ACR so nodes can pull
+# images. Leave empty if the ACR (and its AcrPull grant) is managed in another
+# stack. When set, the Terraform SP needs role-assignment write (Owner or
+# User Access Administrator) on the ACR's scope.
+#   az acr show -n <acr-name> --query id -o tsv
+# acr_id = "/subscriptions/<sub>/resourceGroups/<acr-rg>/providers/Microsoft.ContainerRegistry/registries/<acr-name>"
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+
+location = "eastus"
+
+# resource_group_name is the cluster RG. This is the ONLY RG that
+# `terraform destroy` touches. Keep it distinct from:
+#   - the Terraform state RG (docs/remote-state.md, typically fortiaigate-tfstate)
+#   - the ACR RG (docs/registry-and-images.md, typically fortiaigate-acr)
+# Mixing any of these means `terraform destroy` takes out state or images.
+resource_group_name = "fortiaigate-dev"
+cluster_name        = "fortiaigate-dev"
+# build0055 image set from the supplied FortiAIGate release archives.
+# All four must match the images actually pushed to your registry.
+image_tag               = "V8.0.2-build0055"
+triton_image_tag        = "25.11-onnx-trt-agt-rpt-s1"
+triton_models_image_tag = "0.0.5-s1"
+vllm_image_tag          = "0.28.0-rpt-s1"
+
+# Fixed application pool size, independent of deployment licenses.
+app_node_count = 1
+# app_node_max_pods = 110
+
+# Size application nodes for service/database requests and rollout headroom.
+# Choose the size before first deployment; live pool resizing needs planning.
+app_node_vm_size = "Standard_D16s_v5"
+
+# ---------------------------------------------------------------------------
+# GPU support
+# ---------------------------------------------------------------------------
+
+gpu_enabled = true
+# Shared mode needs AKS NVIDIA runtime qualification; full scanning needs vLLM.
+# Dedicated mode normally needs two one-GPU nodes. Both modes need live tests.
+vllm_gpu_attach = "shared"
+gpu_node_count  = 1
+# Existing A10 default; combined Triton/vLLM VRAM and startup memory must be tested.
+# Request regional GPU quota before bootstrap; see docs/gpu-triton-compatibility.md.
+gpu_node_vm_size = "Standard_NV36ads_A10_v5"
+# Auto preserves Azure A10 shared inference sizing; explicit fields override overlays.
+gpu_tuning_profile = "auto"
+# gpu_tuning = { vllm_max_num_seqs = 32 }
+
+# ---------------------------------------------------------------------------
+# Ingress (Application Gateway Ingress Controller)
+# ---------------------------------------------------------------------------
+# Public UI path: keep internal=false, set ingress_host, then create an Azure
+# DNS (or external DNS) A record to the Application Gateway public IP.
+# Internal-only path: set internal=true BEFORE the first deploy. Terraform then
+# creates the Application Gateway with a static private frontend and binds all
+# listeners to it; point internal DNS for ingress_host at
+# `terraform output appgw_private_ip`. See docs/application-gateway-dns-tls.md.
+
+agic_enabled  = true
+ingress_class = "azure-application-gateway"
+internal      = false
+ingress_host  = "fortiaigate.example.com"
+# appgw_private_ip = "10.0.64.254"  # internal=true only; default = second-to-last address of appgw_subnet_cidr
+
+# AGIC annotations. Terraform supplies backend-protocol=https and ssl-redirect
+# defaults; explicit annotations here override them:
+#   - backend-protocol: chart services speak HTTPS (tls.enabled = true)
+#   - ssl-redirect:     send HTTP -> HTTPS at the gateway
+#   - Health probes come from each backend pod readinessProbe. Do not set a
+#     global health-probe-path: llm-gateway, api, and webui use different endpoints.
+#   - appgw-ssl-certificate: name of a cert installed on Application Gateway.
+#                            AGIC ignores this if the Ingress also has spec.tls;
+#                            see docs/application-gateway-dns-tls.md.
+ingress_annotations = {
+  "appgw.ingress.kubernetes.io/backend-protocol" = "https"
+  "appgw.ingress.kubernetes.io/ssl-redirect"     = "true"
+  # "appgw.ingress.kubernetes.io/appgw-ssl-certificate" = "<kv-cert-name>"
+}
+
+# ---------------------------------------------------------------------------
+# Let's Encrypt TLS (optional, default off)
+# ---------------------------------------------------------------------------
+# Automates a browser-trusted cert via cert-manager + ACME DNS-01 against an
+# existing public Azure DNS zone, authenticated with workload identity (no
+# secret). cert-manager then owns fortiaigate-tls-secret, which both serves the
+# trusted frontend cert AND makes AGIC trust the HTTPS backend (so no manual
+# trusted-root upload). Requires ingress_host (above) set to a name in the zone.
+# Full walkthrough: docs/tls-letsencrypt.md.
+#
+# letsencrypt_enabled     = true
+# letsencrypt_environment = "staging"   # validate first, then flip to "production"
+# acme_email              = "you@example.com"
+# dns_zone_name           = "example.com"
+# dns_zone_resource_group = "dns-rg"     # RG holding the DNS zone (may differ from cluster RG)
+# cert_manager_version    = "v1.16.2"
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+
+storage_size         = "100Gi"
+storage_account_tier = "Premium"
+storage_account_kind = "FileStorage"
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+# Upload a deployment license through POST /api/v1/admin/licenses after installation.
+# Do not configure the deprecated node-keyed licenses map.
+
+# Optional supplied web/API TLS (mutually exclusive with letsencrypt_enabled).
+# Generated internal service/database TLS remains enabled in every mode.
+# tls_certificate_path    = "/secure/certs/fortiaigate-fullchain.pem"
+# tls_private_key_path    = "/secure/certs/fortiaigate.key"
+# tls_ca_certificate_path = "/secure/certs/company-root-ca.pem" # Private CA only
+
+# Existing networking (all IDs in the deployment subscription and region).
+# Leave unset to create networking. See docs/existing-network.md.
+# existing_vnet_id         = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>"
+# existing_aks_subnet_id   = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<aks-subnet>"
+# existing_appgw_subnet_id = "/subscriptions/<subscription-id>/resourceGroups/<network-rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<appgw-subnet>"
+# service_cidr   = "10.1.0.0/16"
+# dns_service_ip = "10.1.0.10"
