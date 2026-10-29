@@ -42,6 +42,7 @@ mock_provider "azurerm" {
       id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test/providers/Microsoft.ContainerService/managedClusters/test"
       identity = { principal_id = "33333333-3333-3333-3333-333333333333" }
       ingress_application_gateway = {
+        effective_gateway_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/MC_test/providers/Microsoft.Network/applicationGateways/addon-gateway"
         ingress_application_gateway_identity = [{
           object_id                 = "44444444-4444-4444-4444-444444444444"
           client_id                 = "55555555-5555-5555-5555-555555555555"
@@ -61,6 +62,7 @@ mock_provider "azurerm" {
   }
 }
 mock_provider "azuread" {}
+mock_provider "azapi" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
 mock_provider "random" {}
@@ -75,12 +77,47 @@ variables {
 run "generated" {
   command = apply
   assert {
+    condition     = length(azurerm_application_gateway.this) == 0 && length(azurerm_public_ip.appgw) == 0 && length(azapi_update_resource.public_appgw_trusted_root) == 1
+    error_message = "Default public mode must configure trust on the existing add-on gateway without creating a replacement gateway or public IP."
+  }
+  assert {
+    condition     = azapi_update_resource.public_appgw_trusted_root[0].resource_id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/MC_test/providers/Microsoft.Network/applicationGateways/addon-gateway"
+    error_message = "The root upload must target the gateway ID returned by AKS, not an assumed resource group or name."
+  }
+  assert {
+    condition = azapi_update_resource.public_appgw_trusted_root[0].body == {
+      properties = {
+        trustedRootCertificates = [{
+          name       = "fortiaigate-ca"
+          properties = { data = base64encode(tls_self_signed_cert.ca[0].cert_pem) }
+        }]
+      }
+    }
+    error_message = "Public gateway updates must contain only the named generated trust root, with no routing or frontend changes."
+  }
+  assert {
+    condition     = azapi_update_resource.public_appgw_trusted_root[0].list_unique_id_property["properties.trustedRootCertificates"] == "name" && contains(azapi_update_resource.public_appgw_trusted_root[0].ignore_other_items_in_list, "properties.trustedRootCertificates")
+    error_message = "Root updates must merge by name and ignore unrelated root certificates during drift checks."
+  }
+  assert {
+    condition     = yamldecode(local.appgw_trusted_root_values[0]).ingress.annotations["appgw.ingress.kubernetes.io/appgw-trusted-root-certificate"] == "fortiaigate-ca"
+    error_message = "Public ingress must select the uploaded trust root."
+  }
+  assert {
     condition     = local.generated_web_tls && local.web_has_private_ca
     error_message = "Default web TLS must use the generated CA."
   }
   assert {
     condition     = yamldecode(local.tls_values[0]).postgresql.tls.enabled && yamldecode(local.tls_values[0]).redis.tls.enabled
     error_message = "Generated mode must enable database TLS."
+  }
+  assert {
+    condition     = yamldecode(local.application_secret_values[0]).api.masterKeyExistingSecret == "fortiaigate-application" && yamldecode(local.application_secret_values[0]).redis.auth.existingSecret == "fortiaigate-redis"
+    error_message = "Application encryption/CSRF and Redis credentials must reference Terraform-owned secrets."
+  }
+  assert {
+    condition     = contains(tls_cert_request.fortiaigate[0].dns_names, "guardrail.fortiaigate.svc.cluster.local") && contains(tls_cert_request.fortiaigate[0].dns_names, "llm-gateway")
+    error_message = "Generated certificates must cover the new service names."
   }
 }
 
@@ -89,6 +126,10 @@ run "supplied_public" {
   variables {
     tls_certificate_path = "test-cert.pem"
     tls_private_key_path = "test-key.pem"
+  }
+  assert {
+    condition     = length(azapi_update_resource.public_appgw_trusted_root) == 0 && length(local.appgw_trusted_root_values) == 0
+    error_message = "Publicly trusted supplied certificates must use the gateway's built-in CA store without a private-root annotation."
   }
   assert {
     condition     = local.supplied_tls && !local.web_has_private_ca && local.web_trusted_root == ""
@@ -136,6 +177,38 @@ run "supplied_private" {
     condition     = one(azurerm_application_gateway.this[0].trusted_root_certificate).data == base64encode(file("test-cert.pem"))
     error_message = "The gateway must trust the supplied CA, not the internal CA."
   }
+  assert {
+    condition     = length(azapi_update_resource.public_appgw_trusted_root) == 0 && yamldecode(local.appgw_trusted_root_values[0]).ingress.annotations["appgw.ingress.kubernetes.io/appgw-trusted-root-certificate"] == "fortiaigate-ca"
+    error_message = "Private gateways must retain AzureRM certificate ownership and the trust annotation."
+  }
+}
+
+run "supplied_private_public_gateway" {
+  command = apply
+  variables {
+    tls_certificate_path    = "test-cert.pem"
+    tls_private_key_path    = "test-key.pem"
+    tls_ca_certificate_path = "test-cert.pem"
+  }
+  assert {
+    condition     = azapi_update_resource.public_appgw_trusted_root[0].body.properties.trustedRootCertificates[0].properties.data == base64encode(file("test-cert.pem"))
+    error_message = "Public gateways must upload the supplied private root rather than the generated internal CA."
+  }
+  assert {
+    condition     = yamldecode(local.appgw_trusted_root_values[0]).ingress.annotations["appgw.ingress.kubernetes.io/appgw-trusted-root-certificate"] == "fortiaigate-ca"
+    error_message = "Supplied private roots must be selected by public ingress."
+  }
+}
+
+run "generated_private_gateway" {
+  command = apply
+  variables {
+    internal = true
+  }
+  assert {
+    condition     = length(azapi_update_resource.public_appgw_trusted_root) == 0 && one(azurerm_application_gateway.this[0].trusted_root_certificate).data == base64encode(tls_self_signed_cert.ca[0].cert_pem)
+    error_message = "Generated private gateway trust must stay in the existing AzureRM resource."
+  }
 }
 
 run "letsencrypt" {
@@ -145,6 +218,10 @@ run "letsencrypt" {
     acme_email              = "operator@example.com"
     dns_zone_name           = "example.com"
     dns_zone_resource_group = "dns-test"
+  }
+  assert {
+    condition     = length(azapi_update_resource.public_appgw_trusted_root) == 0 && length(local.appgw_trusted_root_values) == 0
+    error_message = "Let's Encrypt must not upload or select the generated internal CA for web backends."
   }
   assert {
     condition     = length(kubernetes_secret.tls) == 0 && local.web_trusted_root == ""
@@ -214,4 +291,84 @@ run "unreadable_certificate" {
     tls_private_key_path = "test-key.pem"
   }
   expect_failures = [var.tls_certificate_path]
+}
+
+run "build0055_shared_gpu" {
+  command = apply
+  variables {
+    gpu_enabled    = true
+    gpu_node_count = 1
+  }
+  assert {
+    condition     = helm_release.fortiaigate.version == "8.0.2" && var.image_tag == "V8.0.2-build0055"
+    error_message = "Fresh installations must use the build0055 chart/image set."
+  }
+  assert {
+    condition     = azurerm_kubernetes_cluster_node_pool.gpu[0].min_count == 1 && azurerm_kubernetes_cluster_node_pool.gpu[0].gpu_driver == "Install"
+    error_message = "GPU capacity and explicit AKS driver configuration must be preserved."
+  }
+  assert {
+    condition     = one([for item in helm_release.fortiaigate.set : item.value if item.name == "vllm.gpuAttach"]) == "shared" && one([for item in helm_release.fortiaigate.set : item.value if item.name == "dpAgent.enabled"]) == "false"
+    error_message = "Shared GPU must be explicit and the unsupplied DP agent must stay disabled."
+  }
+  assert {
+    condition     = yamldecode(local.placement_values[0]).fortiaigate.gpuWorkloadPlacement.nodeSelector["fortiaigate-role"] == "gpu" && yamldecode(local.placement_values[0]).postgresql.primary.nodeSelector["fortiaigate-role"] == "app"
+    error_message = "Terraform must pass GPU and database placement into the release values."
+  }
+}
+
+run "build0055_dedicated_gpu" {
+  command = apply
+  variables {
+    gpu_enabled     = true
+    gpu_node_count  = 2
+    vllm_gpu_attach = "dedicated"
+  }
+  assert {
+    condition     = azurerm_kubernetes_cluster_node_pool.gpu[0].min_count == 2 && azurerm_kubernetes_cluster_node_pool.gpu[0].max_count == 2 && one([for item in helm_release.fortiaigate.set : item.value if item.name == "vllm.gpuAttach"]) == "dedicated"
+    error_message = "Dedicated mode must configure the requested GPU pool capacity and chart topology."
+  }
+}
+
+run "obsolete_node_license" {
+  command = plan
+  variables {
+    licenses = { "aks-app-old-node" = "missing-license.lic" }
+  }
+  expect_failures = [var.licenses]
+}
+
+run "invalid_gpu_count" {
+  command = plan
+  variables {
+    gpu_node_count = 0
+  }
+  expect_failures = [var.gpu_node_count]
+}
+
+run "invalid_gpu_topology" {
+  command = plan
+  variables {
+    vllm_gpu_attach = "auto"
+  }
+  expect_failures = [var.vllm_gpu_attach]
+}
+
+run "internal_certificate_identity" {
+  command = apply
+  assert {
+    condition     = tls_cert_request.internal.subject[0].common_name == "fortiaigate_postgres_user" && tls_cert_request.fortiaigate[0].subject[0].common_name == var.ingress_host && tls_cert_request.internal.dns_names == tls_cert_request.fortiaigate[0].dns_names
+    error_message = "Internal certificate CN must match PostgreSQL without changing web identity or service SANs."
+  }
+}
+
+run "internal_certificate_overlay_identity" {
+  command = apply
+  variables {
+    extra_values_files = ["tests/terraform/postgres-user.yaml", "tests/terraform/postgres-user-final.yaml"]
+  }
+  assert {
+    condition     = tls_cert_request.internal.subject[0].common_name == "final_user"
+    error_message = "Internal client certificate must follow final Helm username precedence."
+  }
 }

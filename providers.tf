@@ -8,6 +8,9 @@ provider "azurerm" {
 
 provider "azuread" {}
 
+# Uses the same ARM_* credentials / Azure CLI context as AzureRM.
+provider "azapi" {}
+
 # Both the helm and kubernetes providers authenticate via the kubeconfig
 # emitted by the AKS resource. On the very first apply (when the cluster
 # doesn't exist yet), Terraform defers provider initialization for

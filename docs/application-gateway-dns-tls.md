@@ -1,13 +1,9 @@
 # Application Gateway, DNS, and TLS
 
-This stack's Azure equivalent of the AWS `ALB + Route 53 + ACM` pattern is:
-
-| AWS | Azure |
-|-----|-------|
-| Application Load Balancer | Application Gateway managed by AGIC |
-| Route 53 hosted zone | Azure DNS zone, or whichever DNS provider owns the zone |
-| Route 53 alias/A record | `A` record pointing at the Application Gateway public IP |
-| ACM certificate | Kubernetes TLS secret, cert-manager-managed secret, or an Application Gateway SSL certificate |
+Application Gateway provides ingress through AGIC. Azure DNS or another DNS
+provider maps the application hostname to its frontend IP. Web certificates
+come from Terraform-generated material, supplied PEM files, or cert-manager;
+internal database/service TLS has independent certificate ownership.
 
 ## Public UI flow
 
@@ -105,10 +101,33 @@ on the public IP, a `CNAME` to that label is also possible.
 ## TLS options
 
 By default the stack creates `fortiaigate-tls-secret` in `tls.tf` from a
-certificate signed by a Terraform-generated, per-deployment CA. In internal mode
-that CA is uploaded to the gateway as a trusted root, so the gateway reaches
-the backends without a 502 (see [TLS](#tls) under internal access). In public
-mode it isn't uploaded, and browsers won't trust the CA in either mode.
+certificate signed by a Terraform-generated, per-deployment CA. In both public
+and internal AGIC modes, Terraform uploads that CA as `fortiaigate-ca` and adds
+the ingress trusted-root annotation, so the gateway can validate HTTPS backends.
+Browsers still need the CA in their trust store in either mode.
+
+The public gateway stays owned by the AKS add-on. An AzAPI update manages only
+the named root certificate, merging by name to preserve unrelated roots and
+AGIC's routing configuration. The upload targets the gateway ID returned by
+AKS and completes before the application Helm release installs. Private
+gateways retain their existing AzureRM certificate configuration.
+
+When upgrading to this version, run `terraform init` to install the locked
+AzAPI provider, then review and apply the full plan. Public mode adds
+`azapi_update_resource.public_appgw_trusted_root[0]` when using a generated or
+supplied private CA; it does not replace the gateway or its frontend IP.
+AzAPI uses the same `ARM_*` credentials or Azure CLI context as AzureRM. The
+Terraform caller needs Application Gateway read/write access in the AKS node
+resource group and subnet read/join permission on the gateway subnet, including
+when that subnet belongs to an external network resource group.
+
+The update refreshes the named certificate when its CA changes. Removing the
+update resource (for example, when switching to a publicly trusted certificate)
+leaves the uploaded root on the gateway; the ingress stops referencing it.
+AzAPI does not delete the add-on gateway on teardown. Remove unused roots
+separately after verifying that no backend settings reference them. See the
+[AzAPI update lifecycle](https://registry.terraform.io/providers/Azure/azapi/2.9.0/docs/resources/update_resource)
+and [AGIC trust annotation](https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-annotations#application-gateway-trusted-root-certificate).
 
 For production, use one of these patterns:
 
@@ -249,11 +268,10 @@ the gateway trusts the HTTPS backends. This removes the self-signed **502**.
   Azure **Private** DNS zone with the same name linked to this VNet,
   cert-manager's propagation self-check resolves the private zone and never sees
   the TXT record, so run cert-manager with
-  `--dns01-recursive-nameservers-only --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53`.
-- **Public mode** uses the add-on's gateway, which Terraform doesn't manage, so
-  the CA is **not** uploaded there and self-signed public mode still returns
-  502 until its private root is installed manually. Use Let's Encrypt or a
-  supplied publicly trusted certificate to avoid that upload.
+   `--dns01-recursive-nameservers-only --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53`.
+- **Public mode** uses the add-on's gateway. Terraform uploads generated or
+  supplied private roots through AzAPI and selects `fortiaigate-ca` in the
+  ingress, as described in [TLS options](#tls-options).
 - **No usable DNS yet.** `node scripts/ui-proxy.mjs` from a machine with
   cluster access reaches the UI through port-forwards, bypassing the gateway.
 

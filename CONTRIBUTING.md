@@ -26,7 +26,7 @@ You need:
 - Helm 3
 - Python 3.10+ for Helm rendering checks
 - [`tflint`](https://github.com/terraform-linters/tflint) v0.53.0 — same checks CI runs
-- [`terraform-docs`](https://terraform-docs.io/) — regenerates the README input table
+- [`terraform-docs`](https://terraform-docs.io/) — regenerates `docs/terraform-reference.md`
 - [`pre-commit`](https://pre-commit.com/) — runs all of the above before each commit
 
 Install the pre-commit hooks once:
@@ -54,16 +54,19 @@ tflint --recursive
 python3 -m pip install -r tests/requirements.txt
 python3 -m unittest discover -s tests -v
 python3 scripts/test_tls.py # Requires Terraform 1.7+ and OpenSSL
+python3 tests/check_gpu_tuning.py
+python3 scripts/check_docs.py
+terraform-docs .
 ```
 
-CI runs formatting, validation, TFLint, and Helm rendering checks on every PR (`.github/workflows/terraform.yml`).
+CI runs formatting, validation, TFLint, Helm rendering, GPU value composition, and documentation link checks on pushes and PRs to `main` and `v8.0.2` (`.github/workflows/terraform.yml`).
 
 ## Pull requests
 
 - Branch from `main`. Keep PRs focused on a single concern.
 - Include a `terraform plan` excerpt in the description when the change affects infrastructure resources, not just docs/CI.
 - Update `CHANGELOG.md` under the `## Unreleased` section.
-- If you change variables, run `terraform-docs` (or let pre-commit run it) so the README input table stays in sync.
+- If you change variables, run `terraform-docs` (or let pre-commit run it) so the Terraform reference stays in sync.
 - Keep environment templates under `tfvars/*.tfvars.example`, using placeholder values only.
 - Validate from a clean checkout or temporary directory so ignored local tfvars and backend state do not affect checks.
 

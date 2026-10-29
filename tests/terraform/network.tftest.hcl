@@ -42,6 +42,7 @@ mock_provider "azurerm" {
       id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test/providers/Microsoft.ContainerService/managedClusters/test"
       identity = { principal_id = "33333333-3333-3333-3333-333333333333" }
       ingress_application_gateway = {
+        effective_gateway_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/MC_test/providers/Microsoft.Network/applicationGateways/addon-gateway"
         ingress_application_gateway_identity = [{
           object_id                 = "44444444-4444-4444-4444-444444444444"
           client_id                 = "55555555-5555-5555-5555-555555555555"
@@ -72,6 +73,7 @@ mock_provider "azurerm" {
   }
 }
 mock_provider "azuread" {}
+mock_provider "azapi" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
 mock_provider "random" {}
@@ -85,12 +87,20 @@ variables {
 run "managed_network" {
   command = apply
   assert {
+    condition     = azurerm_role_assignment.cluster_storage_contributor.principal_id == azurerm_kubernetes_cluster.this.identity[0].principal_id
+    error_message = "Managed networking must grant storage provisioning access to the system-assigned cluster identity."
+  }
+  assert {
     condition     = length(azurerm_virtual_network.this) == 1 && length(azurerm_subnet.aks) == 1 && length(azurerm_subnet.appgw) == 1 && length(azurerm_user_assigned_identity.aks_network) == 0
     error_message = "Default networking must remain managed without a new cluster identity."
   }
 }
 run "existing_public" {
   command = apply
+  assert {
+    condition     = azurerm_role_assignment.cluster_storage_contributor.principal_id == azurerm_user_assigned_identity.aks_network[0].principal_id
+    error_message = "Existing networking must grant storage provisioning access to the user-assigned control-plane identity."
+  }
   variables {
     existing_vnet_id         = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared"
     existing_aks_subnet_id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared/subnets/aks"
@@ -99,7 +109,6 @@ run "existing_public" {
     agic_enabled             = true
     ingress_class            = "azure-application-gateway"
     gpu_enabled              = true
-    licenses                 = { aks-gpu-test = "test-cert.pem" }
     service_cidr             = "172.20.0.0/16"
     dns_service_ip           = "172.20.0.10"
   }
@@ -122,6 +131,10 @@ run "existing_public" {
 }
 run "existing_private" {
   command = apply
+  assert {
+    condition     = azurerm_role_assignment.cluster_storage_contributor.principal_id == azurerm_user_assigned_identity.aks_network[0].principal_id
+    error_message = "Existing networking must grant storage provisioning access to the user-assigned control-plane identity."
+  }
   variables {
     existing_vnet_id         = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared"
     existing_aks_subnet_id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared/subnets/aks"
@@ -130,7 +143,6 @@ run "existing_private" {
     agic_enabled             = true
     ingress_class            = "azure-application-gateway"
     gpu_enabled              = true
-    licenses                 = { aks-gpu-test = "test-cert.pem" }
     service_cidr             = "172.20.0.0/16"
     dns_service_ip           = "172.20.0.10"
   }
@@ -157,6 +169,14 @@ run "existing_private" {
 }
 run "existing_without_agic" {
   command = apply
+  assert {
+    condition     = length(azapi_update_resource.public_appgw_trusted_root) == 0 && length(local.appgw_trusted_root_values) == 0
+    error_message = "Disabling AGIC must disable gateway trust updates and annotations."
+  }
+  assert {
+    condition     = azurerm_role_assignment.cluster_storage_contributor.principal_id == azurerm_user_assigned_identity.aks_network[0].principal_id
+    error_message = "Existing networking must grant storage provisioning access to the user-assigned control-plane identity."
+  }
   variables {
     existing_vnet_id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared"
     existing_aks_subnet_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network/providers/Microsoft.Network/virtualNetworks/shared/subnets/aks"
@@ -164,7 +184,6 @@ run "existing_without_agic" {
     agic_enabled           = false
     ingress_class          = "nginx"
     gpu_enabled            = true
-    licenses               = { aks-gpu-test = "test-cert.pem" }
     service_cidr           = "172.20.0.0/16"
     dns_service_ip         = "172.20.0.10"
   }

@@ -2,8 +2,23 @@
 
 ## Unreleased
 
+- Automatically install generated or supplied private web CA roots on the public AGIC gateway with a named AzAPI update before Helm installs ingress; preserve the add-on gateway, other roots, and routing ownership. Add AzAPI 2.9, regression coverage, and upgrade/permission guidance.
+- Fix shared Azure Files provisioning permissions in existing-network mode by granting the user-assigned AKS control-plane identity; retain the storage role assignment's resource address and add regression assertions for both network modes.
+- Port the supplied FortiAIGate 8.0.2/build0055 chart changes and image defaults selectively; add verified chart/image fingerprints, GPU profiles, DLP batching controls, and gateway Base URL keepalive configuration.
+- Preserve AKS ingress/probes, app/GPU placement and explicit driver install, Azure Files shared storage, Azure Disk databases, and Terraform-owned credentials. Add automatic Azure A10 inference tuning and validated explicit overrides.
+- Issue an independent internal leaf certificate with the effective PostgreSQL username as CN while preserving existing CA, web TLS, Secret, storage, network and credential resource addresses. Internal databases/clients roll on this transition.
+- Restore external-network validation fixes, eight mocked scenarios, and the missing existing-network guide from the maintained network implementation.
+- Run CI for `main` and `v8.0.2`; validate actual Terraform GPU values through Helm and check local documentation links.
+- Separate deployment configuration, technical notes, staged teardown, and generated Terraform reference from the README; correct the security policy for Azure and remove sibling-repository references.
+
+
+- Document the 8.0.1/build0031 to 8.0.2/build0047 branch comparison, live secret adoption, migration prerequisites, staged cutover, and recovery limits.
+
 - Support externally owned VNets and AKS/Application Gateway subnets, pre-grant AKS network access, and configure Kubernetes service/DNS ranges. Preserve managed-network state with moved declarations.
 
+- Port FortiAIGate 8.0.2/build0047 for fresh AKS installations: LLM gateway/guardrail services, explicit shared/dedicated Triton/vLLM layouts, and deployment licensing.
+- Preserve AKS ingress/probes, app/GPU placement, Azure Disk databases, and separate internal TLS; manage encryption, CSRF, and Redis credentials in Terraform.
+- Add build0047 Helm/Terraform contracts and document live qualification and upgrade gaps.
 - Replace duplicated Claude-specific guidance with shared `AGENTS.md` instructions and an operations/upgrade guide.
 - Support supplied PEM web/API certificates and optional private root CA trust for Application Gateway.
 - Separate internal service/database TLS from web certificates and retain database TLS in Let's Encrypt mode.

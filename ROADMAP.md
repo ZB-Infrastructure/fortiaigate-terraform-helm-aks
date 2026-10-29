@@ -3,16 +3,19 @@
 This repository is a deployment starting point. The production example does not
 establish application HA, disaster recovery, or a security baseline by itself.
 
-- **Certificate lifecycle:** internal TLS now uses a separate generated CA and
+- **Certificate lifecycle:** internal TLS uses a generated deployment CA and a separate
   serving certificate in every web TLS mode. Qualify renewal/rotation and
   upgrades from existing Let's Encrypt deployments in live integration tests;
   supplied PEM web certificates require replacement and Terraform apply.
-- **Stable secrets:** the shared chart generates a new CSRF key on each render
-  unless `fortiaigate.env.csrfSecretKey` is supplied. Preserve the existing secret
-  on upgrade or support an externally managed secret. Coordinate shared chart
-  fixes with EKS and OCI; chart contents already differ between these repos.
+- **Build0055 qualification:** prove fresh installation, deployment licensing,
+  shared/dedicated Triton/vLLM execution, model loading, and scanning on AKS.
+  Qualify CPU capabilities separately. Obtain migration guidance before supporting
+  in-place upgrades from build0031; the DP agent image is absent from the bundle.
+- **Secret recovery:** encryption, CSRF, Redis, and PostgreSQL secrets are now
+  Terraform-owned. Prove restore with the original encryption key and data;
+  qualify adoption/rotation procedures for existing deployments.
 - **Recovery and availability:** automate database/share backups and prove restore
-  in a fresh cluster. Test node replacement, license reassignment, application
+  in a fresh cluster. Test node replacement, deployment license coverage, application
   replica behavior, disruption budgets, and upgrade downtime. Three app nodes do
   not make the bundled single-primary database highly available.
 - **Access controls:** add configurable API access restrictions/private cluster
@@ -27,3 +30,8 @@ establish application HA, disaster recovery, or a security baseline by itself.
   images before distributing a release. Vendoring a chart does not vendor its images.
 - **Release validation:** automate live integration tests in a dedicated Azure
   subscription and publish only after the deployment checklist passes.
+
+Implemented on this branch: external-network input guards and mocked scenarios,
+Azure A10 inference tuning, independent PostgreSQL client certificate identity,
+build0055 image inventory, release-branch CI, generated Terraform reference,
+and staged teardown documentation. Live lifecycle qualification remains open.

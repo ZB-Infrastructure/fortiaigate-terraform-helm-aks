@@ -51,6 +51,9 @@ the AKS subnet before cluster creation. AGIC receives Network Contributor on
 its gateway subnet after its addon identity exists. Default managed-network
 mode retains its system-assigned AKS identity. See Microsoft's
 [managed identity guidance](https://learn.microsoft.com/en-us/azure/aks/use-managed-identity).
+The same user-assigned control-plane identity receives Storage Account
+Contributor on the shared Azure Files account so the CSI controller can
+provision shares. The kubelet storage grants remain separate.
 Azure RBAC propagation can delay access even after a role assignment completes;
 if creation fails with a permission error, confirm the grants and retry after
 propagation.

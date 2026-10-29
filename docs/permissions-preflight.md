@@ -22,6 +22,15 @@ For an externally managed VNet, deployment-resource-group permissions alone
 are insufficient: access and role-assignment rights are also needed on the
 existing subnets. See [Existing networking](existing-network.md).
 
+Public AGIC deployments with generated or supplied private CAs also require
+the Terraform caller to have Application Gateway read/write access in the
+AKS-managed node resource group. AzAPI uploads the backend trust root there
+before Helm installs the ingress. Subnet read/join permissions are required
+on the gateway subnet, including externally owned networking. Subscription
+Contributor covers these resource permissions; deployment-RG-only access does
+not cover the node or external network resource groups. See
+[gateway TLS options](application-gateway-dns-tls.md#tls-options).
+
 ## Step 1 — Log in as the SP
 
 ```bash
