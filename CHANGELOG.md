@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix shared Azure Files provisioning permissions in existing-network mode by granting the user-assigned AKS control-plane identity; retain the storage role assignment's resource address and add regression assertions for both network modes.
 - Port the supplied FortiAIGate 8.0.2/build0055 chart changes and image defaults selectively; add verified chart/image fingerprints, GPU profiles, DLP batching controls, and gateway Base URL keepalive configuration.
 - Preserve AKS ingress/probes, app/GPU placement and explicit driver install, Azure Files shared storage, Azure Disk databases, and Terraform-owned credentials. Add automatic Azure A10 inference tuning and validated explicit overrides.
 - Issue an independent internal leaf certificate with the effective PostgreSQL username as CN while preserving existing CA, web TLS, Secret, storage, network and credential resource addresses. Internal databases/clients roll on this transition.

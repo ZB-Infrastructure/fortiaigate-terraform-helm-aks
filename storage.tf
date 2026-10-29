@@ -67,7 +67,9 @@ resource "azurerm_storage_account" "fortiaigate" {
 resource "azurerm_role_assignment" "cluster_storage_contributor" {
   scope                = azurerm_storage_account.fortiaigate.id
   role_definition_name = "Storage Account Contributor"
-  principal_id         = azurerm_kubernetes_cluster.this.identity[0].principal_id
+  # The cluster identity's principal_id is populated for SystemAssigned only.
+  # Existing networking uses the pre-created user-assigned control-plane identity.
+  principal_id = local.existing_network ? azurerm_user_assigned_identity.aks_network[0].principal_id : azurerm_kubernetes_cluster.this.identity[0].principal_id
 }
 
 resource "azurerm_role_assignment" "kubelet_storage_contributor" {
