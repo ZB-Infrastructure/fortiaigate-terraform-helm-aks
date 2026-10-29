@@ -153,3 +153,37 @@ used. Existing Azure provider deprecation warnings remain. Existing Terraform
 resource declarations were preserved; only the three internal leaf/key/CSR
 resources were added. These offline results do not establish runtime or
 migration compatibility.
+
+## Public gateway backend trust
+
+On 2026-10-29, automatic public gateway trust-root configuration passed isolated
+Terraform validation, 37 mocked Terraform runs, 20 Python/Helm/certificate tests,
+four Terraform-to-Helm GPU cases, TFLint 0.53.0 with Azure ruleset 0.27.0,
+formatting, and local documentation links.
+The new checks cover generated and supplied private roots on the public add-on
+gateway, the actual gateway ID returned by AKS, the limited update body,
+configuration for name-based certificate merging, and the ingress trust
+annotation. They also
+check that private gateways retain AzureRM ownership and that publicly trusted
+certificates, Let's Encrypt, and AGIC-disabled deployments omit the new update.
+
+These are offline results; AzAPI is mocked during the Terraform runs. Before
+production rollout, qualify a public gateway in a dedicated Azure environment:
+
+1. Apply with generated web TLS and check that `fortiaigate-ca` appears in the
+   gateway's trusted roots and is selected in its HTTPS backend settings.
+   Verify healthy backends and UI/API access without HTTP 502 responses.
+2. Repeat with a supplied private CA and then a publicly trusted certificate.
+   Verify CA changes update the named root and the annotation follows the
+   selected certificate mode. Clients must trust private CAs separately.
+3. Confirm a second plan is clean, unrelated roots and AGIC routing survive
+   the update, and an AGIC reconciliation preserves the uploaded root.
+4. Exercise add-on/CA updates and gateway recreation. If Azure rejects an
+   overlapping gateway operation, let the active operation finish and re-plan
+   before retrying. AzAPI's update reads and merges the gateway configuration;
+   it does not lock out the AGIC controller.
+5. Verify teardown leaves externally owned networking intact. Removing the
+   AzAPI update itself leaves its root certificate on the gateway; see
+   [gateway TLS lifecycle](application-gateway-dns-tls.md#tls-options).
+
+No live Azure deployment or gateway health check was performed for this change.

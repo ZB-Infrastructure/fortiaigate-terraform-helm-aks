@@ -363,7 +363,7 @@ variable "tls_private_key_path" {
 }
 
 variable "tls_ca_certificate_path" {
-  description = "Optional PEM root CA certificate for supplied web/API certificates signed by a private CA. Uploaded automatically only to the Terraform-managed private Application Gateway; configure public add-on gateways manually. Omit for a publicly trusted certificate. This is a public certificate, never a CA private key."
+  description = "Optional PEM root CA certificate for supplied web/API certificates signed by a private CA. Uploaded automatically to the Application Gateway in public and private AGIC modes. Omit for a publicly trusted certificate. This is a public certificate, never a CA private key."
   type        = string
   default     = ""
 

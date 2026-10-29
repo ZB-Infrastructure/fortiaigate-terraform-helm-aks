@@ -42,6 +42,7 @@ mock_provider "azurerm" {
       id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test/providers/Microsoft.ContainerService/managedClusters/test"
       identity = { principal_id = "33333333-3333-3333-3333-333333333333" }
       ingress_application_gateway = {
+        effective_gateway_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/MC_test/providers/Microsoft.Network/applicationGateways/addon-gateway"
         ingress_application_gateway_identity = [{
           object_id                 = "44444444-4444-4444-4444-444444444444"
           client_id                 = "55555555-5555-5555-5555-555555555555"
@@ -61,6 +62,7 @@ mock_provider "azurerm" {
   }
 }
 mock_provider "azuread" {}
+mock_provider "azapi" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
 mock_provider "random" {}

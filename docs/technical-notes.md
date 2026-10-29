@@ -19,7 +19,7 @@ Start with the [quickstart](../README.md#quickstart) and [deployment guide](depl
 | --- | --- |
 | `network.tf` | Resource group, managed/external network selection, subnet validation and identity grants |
 | `aks.tf` | AKS, app/GPU pools, driver configuration, ACR and AGIC grants |
-| `appgw.tf` | Private Application Gateway, trusted root and AGIC ownership boundaries |
+| `appgw.tf` | Private Application Gateway, public gateway trust-root update, and AGIC ownership boundaries |
 | `storage.tf` | Shared Azure Files account, identity grants and StorageClass |
 | `helm.tf` | Application/device-plugin/Reloader releases, database credentials, mandatory Helm values |
 | `gpu.tf` | Azure A10 profile and explicit inference tuning |

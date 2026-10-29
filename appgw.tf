@@ -1,4 +1,4 @@
-# Terraform-managed Application Gateway for INTERNAL (private-frontend) ingress.
+# Application Gateway backend trust and INTERNAL (private-frontend) ingress.
 #
 # With internal = false the AGIC add-on creates its own gateway (greenfield, in
 # the AKS node resource group) with a PUBLIC frontend only — see aks.tf. That
@@ -18,8 +18,41 @@
 
 locals {
   appgw_byo               = var.agic_enabled && var.internal
+  public_appgw_private_ca = var.agic_enabled && !var.internal && local.web_has_private_ca
   appgw_private_ip        = var.appgw_private_ip != "" ? var.appgw_private_ip : cidrhost(local.appgw_subnet_cidr, -2)
   appgw_trusted_root_name = "fortiaigate-ca"
+}
+
+# The public gateway remains owned by the AKS add-on. Manage only our named
+# trust root, using AzAPI's name-based list merge to preserve other roots and
+# the live AGIC routing configuration. AzureRM has no standalone root resource.
+resource "azapi_update_resource" "public_appgw_trusted_root" {
+  count = local.public_appgw_private_ca ? 1 : 0
+
+  type        = "Microsoft.Network/applicationGateways@2024-05-01"
+  resource_id = azurerm_kubernetes_cluster.this.ingress_application_gateway[0].effective_gateway_id
+
+  body = {
+    properties = {
+      trustedRootCertificates = [{
+        name = local.appgw_trusted_root_name
+        properties = {
+          data = base64encode(local.web_trusted_root)
+        }
+      }]
+    }
+  }
+
+  list_unique_id_property    = { "properties.trustedRootCertificates" = "name" }
+  ignore_other_items_in_list = ["properties.trustedRootCertificates"]
+  response_export_values     = []
+
+  # The Terraform caller needs gateway write and subnet join rights. Wait for
+  # AGIC's subnet grant too, so its first configuration sync can succeed.
+  depends_on = [
+    terraform_data.tls_configuration,
+    azurerm_role_assignment.agic_appgw_subnet_network_contributor,
+  ]
 }
 
 resource "azurerm_public_ip" "appgw" {

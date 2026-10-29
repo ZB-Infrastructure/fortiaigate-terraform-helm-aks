@@ -114,10 +114,9 @@ locals {
     }
   })] : []
 
-  # Private gateways trust the generated or supplied web CA uploaded in appgw.tf.
-  # Public add-on gateways require manual private-root installation; publicly
-  # trusted web certificates need no custom root upload.
-  appgw_trusted_root_values = (local.appgw_byo && local.web_has_private_ca) ? [yamlencode({
+  # Both gateway modes trust the generated or supplied web CA from appgw.tf.
+  # Publicly trusted web certificates need no custom root upload.
+  appgw_trusted_root_values = (var.agic_enabled && local.web_has_private_ca) ? [yamlencode({
     ingress = {
       annotations = {
         "appgw.ingress.kubernetes.io/appgw-trusted-root-certificate" = local.appgw_trusted_root_name
@@ -304,6 +303,7 @@ resource "helm_release" "fortiaigate" {
     terraform_data.tls_configuration,
     # The trusted root must exist on the gateway before AGIC reads the annotation.
     azurerm_application_gateway.this,
+    azapi_update_resource.public_appgw_trusted_root,
     # In Let's Encrypt mode this owns fortiaigate-tls-secret instead; both are
     # counted resources, so whichever is inactive is simply an empty dependency.
     helm_release.cert_manager_issuer,

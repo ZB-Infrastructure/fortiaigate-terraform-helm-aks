@@ -63,20 +63,17 @@ connections. Terraform sets both backend and health-probe hostnames to
 service names. Avoid overriding those annotations with a different hostname.
 Per-service health-probe paths remain derived from each readiness probe.
 
-For `internal=true`, Terraform uploads `tls_ca_certificate_path` as the gateway's
-trusted root and adds the ingress trusted-root annotation. Publicly trusted
-certificates need no custom root upload.
+With AGIC enabled, Terraform uploads `tls_ca_certificate_path` as the gateway's
+`fortiaigate-ca` trusted root and adds the ingress trusted-root annotation in
+both public and private modes. Private gateways use their existing AzureRM
+configuration; public add-on gateways use a named AzAPI update before the
+application Helm release. Publicly trusted certificates need no custom root
+upload. See [the gateway guide](application-gateway-dns-tls.md#tls-options) for
+provider setup, permissions, and certificate cleanup when switching modes.
 
-For `internal=false`, the AKS add-on owns the public gateway. Terraform does not
-upload private roots to that gateway. Upload the supplied root certificate
-manually using the process in [the gateway guide](application-gateway-dns-tls.md),
-and set this ingress annotation to the uploaded root's name:
-
-```hcl
-ingress_annotations = {
-  "appgw.ingress.kubernetes.io/appgw-trusted-root-certificate" = "company-root"
-}
-```
+If you previously uploaded a root manually and set the ingress annotation to
+its name, remove that annotation override to use the automatically managed
+`fortiaigate-ca`. Unrelated uploaded roots are preserved.
 
 Browsers/API clients also need to trust your corporate root. Export it with
 `terraform output -raw tls_ca_certificate` if supplied. That output is empty for

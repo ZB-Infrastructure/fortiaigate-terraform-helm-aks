@@ -8,6 +8,7 @@ Generated from the root Terraform configuration. Return to the [quickstart](../R
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5 |
+| <a name="requirement_azapi"></a> [azapi](#requirement\_azapi) | ~> 2.9.0 |
 | <a name="requirement_azuread"></a> [azuread](#requirement\_azuread) | ~> 3.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | ~> 2.15 |
@@ -19,6 +20,7 @@ Generated from the root Terraform configuration. Return to the [quickstart](../R
 
 | Name | Version |
 | ---- | ------- |
+| <a name="provider_azapi"></a> [azapi](#provider\_azapi) | ~> 2.9.0 |
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | ~> 4.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | ~> 2.15 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 2.35 |
@@ -34,6 +36,7 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
+| [azapi_update_resource.public_appgw_trusted_root](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/update_resource) | resource |
 | [azurerm_application_gateway.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_gateway) | resource |
 | [azurerm_federated_identity_credential.cert_manager](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/federated_identity_credential) | resource |
 | [azurerm_kubernetes_cluster.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/kubernetes_cluster) | resource |
@@ -138,7 +141,7 @@ No modules.
 | <a name="input_storage_account_kind"></a> [storage\_account\_kind](#input\_storage\_account\_kind) | Storage account kind. Use 'FileStorage' (Premium) for low-latency Azure Files; 'StorageV2' for Standard tier. | `string` | `"FileStorage"` | no |
 | <a name="input_storage_account_tier"></a> [storage\_account\_tier](#input\_storage\_account\_tier) | Storage account tier backing Azure Files. 'Premium' is required for FileStorage kind (low-latency SMB/NFS); 'Standard' works only with StorageV2. | `string` | `"Premium"` | no |
 | <a name="input_storage_size"></a> [storage\_size](#input\_storage\_size) | Size of the shared Azure Files-backed PVC | `string` | `"100Gi"` | no |
-| <a name="input_tls_ca_certificate_path"></a> [tls\_ca\_certificate\_path](#input\_tls\_ca\_certificate\_path) | Optional PEM root CA certificate for supplied web/API certificates signed by a private CA. Uploaded automatically only to the Terraform-managed private Application Gateway; configure public add-on gateways manually. Omit for a publicly trusted certificate. This is a public certificate, never a CA private key. | `string` | `""` | no |
+| <a name="input_tls_ca_certificate_path"></a> [tls\_ca\_certificate\_path](#input\_tls\_ca\_certificate\_path) | Optional PEM root CA certificate for supplied web/API certificates signed by a private CA. Uploaded automatically to the Application Gateway in public and private AGIC modes. Omit for a publicly trusted certificate. This is a public certificate, never a CA private key. | `string` | `""` | no |
 | <a name="input_tls_certificate_path"></a> [tls\_certificate\_path](#input\_tls\_certificate\_path) | Optional PEM serving certificate chain (leaf first, then intermediates) for web/API HTTPS. Requires tls\_private\_key\_path and ingress\_host; mutually exclusive with letsencrypt\_enabled. Internal services and databases retain generated TLS certificates. | `string` | `""` | no |
 | <a name="input_tls_private_key_path"></a> [tls\_private\_key\_path](#input\_tls\_private\_key\_path) | Path to the unencrypted PEM private key matching tls\_certificate\_path. Its contents are stored in Terraform state; protect the state and keep the file outside version control. | `string` | `""` | no |
 | <a name="input_triton_image_tag"></a> [triton\_image\_tag](#input\_triton\_image\_tag) | Tag for the custom-triton inference server image in CPU/GPU profiles. Must match the image pushed to the registry. | `string` | `"25.11-onnx-trt-agt-rpt-s1"` | no |
